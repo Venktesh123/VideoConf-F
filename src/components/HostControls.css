@@ -10,6 +10,12 @@
   flex-direction: column;
   z-index: 15;
   box-shadow: -5px 0 15px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s ease;
+}
+
+.host-controls-container.urgent {
+  border-left: 3px solid #ff9800;
+  box-shadow: -5px 0 20px rgba(255, 152, 0, 0.4);
 }
 
 .host-controls-header {
@@ -20,6 +26,22 @@
   border-bottom: 1px solid #333;
   background: linear-gradient(135deg, #ffd700 0%, #ffb347 100%);
   color: #1e1e1e;
+  position: relative;
+}
+
+.host-controls-container.urgent .host-controls-header {
+  background: linear-gradient(135deg, #ff9800 0%, #ff6f00 100%);
+  animation: urgentPulse 2s infinite;
+}
+
+@keyframes urgentPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(255, 152, 0, 0);
+  }
 }
 
 .host-controls-title {
@@ -28,6 +50,18 @@
   gap: 10px;
   font-weight: 600;
   font-size: 16px;
+}
+
+.urgent-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background-color: rgba(255, 255, 255, 0.2);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: bold;
+  animation: pulse 1.5s infinite;
 }
 
 .host-controls-close-button {
@@ -53,6 +87,12 @@
 
 .host-section {
   border-bottom: 1px solid #333;
+  transition: all 0.3s ease;
+}
+
+.host-section.urgent-section {
+  background-color: rgba(255, 152, 0, 0.05);
+  border-left: 4px solid #ff9800;
 }
 
 .section-header {
@@ -62,6 +102,11 @@
   padding: 15px 20px;
   background-color: #2a2a2a;
   border-bottom: 1px solid #333;
+  position: relative;
+}
+
+.urgent-section .section-header {
+  background-color: rgba(255, 152, 0, 0.1);
 }
 
 .section-header h3 {
@@ -71,12 +116,54 @@
   color: #2d8cff;
 }
 
+.urgent-section .section-header h3 {
+  color: #ff9800;
+}
+
+.urgent-indicator {
+  margin-left: auto;
+  color: #ff9800;
+  animation: bounce 1s infinite;
+}
+
+@keyframes bounce {
+  0%,
+  20%,
+  50%,
+  80%,
+  100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-5px);
+  }
+  60% {
+    transform: translateY(-3px);
+  }
+}
+
 .no-waiting,
 .no-participants {
-  padding: 20px;
+  padding: 30px 20px;
   text-align: center;
   color: #888;
-  font-style: italic;
+}
+
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 15px;
+  opacity: 0.3;
+}
+
+.no-waiting p,
+.no-participants p {
+  margin: 10px 0 5px 0;
+  font-size: 16px;
+}
+
+.no-waiting small {
+  font-size: 12px;
+  opacity: 0.7;
 }
 
 .waiting-list,
@@ -91,12 +178,22 @@
   align-items: center;
   padding: 15px 20px;
   border-bottom: 1px solid #2a2a2a;
-  transition: background-color 0.2s ease;
+  transition: all 0.2s ease;
+}
+
+.waiting-participant.urgent {
+  background-color: rgba(255, 152, 0, 0.05);
+  border-left: 3px solid #ff9800;
+  animation: slideInRight 0.3s ease-out;
 }
 
 .waiting-participant:hover,
 .current-participant:hover {
   background-color: #2a2a2a;
+}
+
+.urgent-section .waiting-participant:hover {
+  background-color: rgba(255, 152, 0, 0.1);
 }
 
 .waiting-participant:last-child,
@@ -118,7 +215,17 @@
   text-overflow: ellipsis;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+}
+
+.new-badge {
+  background-color: #ff9800;
+  color: white;
+  font-size: 10px;
+  font-weight: bold;
+  padding: 2px 6px;
+  border-radius: 8px;
+  animation: pulse 2s infinite;
 }
 
 .host-badge {
@@ -141,6 +248,7 @@
 .waiting-duration {
   color: #ff9800;
   font-style: italic;
+  font-weight: 500;
 }
 
 .participant-status {
@@ -217,6 +325,10 @@
   background-color: #2a2a2a;
 }
 
+.tips-section .host-tips {
+  background-color: #262626;
+}
+
 .host-tips h4 {
   margin: 0 0 15px 0;
   color: #ffd700;
@@ -243,11 +355,16 @@
   line-height: 1.4;
 }
 
-/* Animation for new waiting participants */
-.waiting-participant {
-  animation: slideInRight 0.3s ease-out;
+.urgent-tip {
+  color: #ff9800 !important;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  animation: pulse 2s infinite;
 }
 
+/* Enhanced animations */
 @keyframes slideInRight {
   from {
     transform: translateX(20px);
@@ -259,20 +376,28 @@
   }
 }
 
-/* Pulse animation for approve/deny buttons */
-.waiting-participant .participant-actions {
-  animation: pulse 2s infinite;
-}
-
 @keyframes pulse {
-  0% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
     opacity: 0.7;
   }
+}
+
+/* Pulse animation for approve/deny buttons when urgent */
+.urgent .participant-actions {
+  animation: actionPulse 3s infinite;
+}
+
+@keyframes actionPulse {
+  0%,
   100% {
-    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
   }
 }
 
@@ -345,6 +470,11 @@
   .host-tips li {
     font-size: 11px;
   }
+
+  .urgent-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+  }
 }
 
 @media (max-width: 480px) {
@@ -358,5 +488,10 @@
 
   .participant-actions {
     gap: 4px;
+  }
+
+  .new-badge {
+    font-size: 8px;
+    padding: 1px 4px;
   }
 }

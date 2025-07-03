@@ -6,6 +6,60 @@
   background-color: #121212;
 }
 
+/* Enhanced notifications */
+.notifications {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 400px;
+}
+
+.notification {
+  padding: 12px 16px;
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: slideInRight 0.3s ease-out;
+  position: relative;
+  border-left: 4px solid transparent;
+}
+
+.notification.info {
+  background-color: #2d8cff;
+  border-left-color: #1a7bef;
+}
+
+.notification.success {
+  background-color: #4caf50;
+  border-left-color: #388e3c;
+}
+
+.notification.warning {
+  background-color: #ff9800;
+  border-left-color: #f57c00;
+}
+
+.notification.error {
+  background-color: #f44336;
+  border-left-color: #d32f2f;
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
 .room-header {
   display: flex;
   justify-content: space-between;
@@ -27,6 +81,30 @@
   font-size: 12px;
   color: #888;
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.host-indicator {
+  color: #ffd700;
+  font-weight: 600;
+}
+
+.waiting-indicator {
+  color: #ff9800;
+  font-weight: 600;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
 }
 
 .header-controls {
@@ -128,24 +206,71 @@
   font-size: 16px;
 }
 
+/* Connecting state */
+.room.connecting {
+  justify-content: center;
+  align-items: center;
+}
+
+.connecting-message {
+  text-align: center;
+  color: white;
+}
+
+.connecting-message h2 {
+  margin-bottom: 20px;
+  color: #2d8cff;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #333;
+  border-top: 4px solid #2d8cff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
 /* Adjust layout when panels are open */
-.room:has(.chat-panel) .participants-container,
+.room:has(.chat-container) .participants-container,
 .room:has(.participants-list) .participants-container {
   margin-right: 350px;
 }
 
-.room:has(.waiting-room-panel) .participants-container {
-  margin-right: 400px;
+.room:has(.host-controls-container) .participants-container {
+  margin-right: 380px;
 }
 
 /* Mobile responsive adjustments */
 @media (max-width: 768px) {
+  .notifications {
+    top: 10px;
+    right: 10px;
+    left: 10px;
+    max-width: none;
+  }
+
+  .notification {
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+
   .participants-container {
     grid-template-columns: 1fr !important;
     grid-auto-rows: minmax(200px, 1fr);
     gap: 8px;
     padding: 8px;
-    margin-right: 0 !important; /* Override panel margins on mobile */
+    margin-right: 0 !important;
   }
 
   .participant-wrapper {
@@ -161,6 +286,11 @@
 
   .room-header h2 {
     font-size: 16px;
+  }
+
+  .connection-status {
+    font-size: 11px;
+    flex-wrap: wrap;
   }
 
   .header-controls {
@@ -179,10 +309,10 @@
   }
 
   /* On mobile, panels take full screen */
-  .room:has(.chat-panel) .participants-container,
+  .room:has(.chat-container) .participants-container,
   .room:has(.participants-list) .participants-container,
-  .room:has(.waiting-room-panel) .participants-container {
-    display: none; /* Hide main content when panels are open on mobile */
+  .room:has(.host-controls-container) .participants-container {
+    display: none;
   }
 }
 
@@ -199,4 +329,24 @@
   .participant-wrapper {
     min-height: 150px;
   }
+
+  .notifications {
+    top: 5px;
+    right: 5px;
+    left: 5px;
+  }
+}
+
+/* Enhanced host controls visibility */
+.room:has(.host-controls-container.urgent) .participants-container {
+  margin-right: 380px;
+  transition: margin-right 0.3s ease;
+}
+
+/* Waiting room indicator styles */
+.waiting-indicator {
+  background-color: rgba(255, 152, 0, 0.1);
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid #ff9800;
 }

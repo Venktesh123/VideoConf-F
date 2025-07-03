@@ -5,7 +5,8 @@ import {
   FaCheck,
   FaUserMinus,
   FaCrown,
-  FaEye,
+  FaUsers,
+  FaExclamationTriangle,
 } from "react-icons/fa";
 import "./HostControls.css";
 
@@ -37,12 +38,24 @@ const HostControls = ({
 
   if (!isOpen) return null;
 
+  const hasWaitingParticipants = waitingParticipants.length > 0;
+
   return (
-    <div className="host-controls-container">
+    <div
+      className={`host-controls-container ${
+        hasWaitingParticipants ? "urgent" : ""
+      }`}
+    >
       <div className="host-controls-header">
         <div className="host-controls-title">
           <FaCrown />
           <span>Host Controls</span>
+          {hasWaitingParticipants && (
+            <span className="urgent-badge">
+              <FaExclamationTriangle />
+              {waitingParticipants.length}
+            </span>
+          )}
         </div>
         <button className="host-controls-close-button" onClick={onClose}>
           <FaTimes />
@@ -50,24 +63,39 @@ const HostControls = ({
       </div>
 
       <div className="host-controls-content">
-        {/* Waiting Room Section */}
-        <div className="host-section">
+        {/* Waiting Room Section - Prioritized */}
+        <div
+          className={`host-section ${
+            hasWaitingParticipants ? "urgent-section" : ""
+          }`}
+        >
           <div className="section-header">
             <FaUserClock />
-            <h3>Waiting Room ({waitingParticipants.length})</h3>
+            <h3>Waiting for Approval ({waitingParticipants.length})</h3>
+            {hasWaitingParticipants && (
+              <div className="urgent-indicator">
+                <FaExclamationTriangle />
+              </div>
+            )}
           </div>
 
           {waitingParticipants.length === 0 ? (
             <div className="no-waiting">
+              <FaUserClock className="empty-icon" />
               <p>No participants waiting for approval</p>
+              <small>New participants will appear here for your review</small>
             </div>
           ) : (
             <div className="waiting-list">
               {waitingParticipants.map((participant) => (
-                <div key={participant.id} className="waiting-participant">
+                <div
+                  key={participant.id}
+                  className="waiting-participant urgent"
+                >
                   <div className="participant-info">
                     <div className="participant-name">
                       {participant.username}
+                      <span className="new-badge">NEW</span>
                     </div>
                     <div className="participant-details">
                       <span className="join-time">
@@ -103,12 +131,13 @@ const HostControls = ({
         {/* Current Participants Section */}
         <div className="host-section">
           <div className="section-header">
-            <FaEye />
+            <FaUsers />
             <h3>Current Participants ({currentParticipants.length})</h3>
           </div>
 
           {currentParticipants.length === 0 ? (
             <div className="no-participants">
+              <FaUsers className="empty-icon" />
               <p>Only you are in the meeting</p>
             </div>
           ) : (
@@ -125,6 +154,11 @@ const HostControls = ({
                         className={`status-indicator ${
                           participant.audioEnabled ? "enabled" : "disabled"
                         }`}
+                        title={
+                          participant.audioEnabled
+                            ? "Microphone on"
+                            : "Microphone off"
+                        }
                       >
                         🎤
                       </span>
@@ -132,6 +166,9 @@ const HostControls = ({
                         className={`status-indicator ${
                           participant.videoEnabled ? "enabled" : "disabled"
                         }`}
+                        title={
+                          participant.videoEnabled ? "Camera on" : "Camera off"
+                        }
                       >
                         📹
                       </span>
@@ -155,14 +192,20 @@ const HostControls = ({
         </div>
 
         {/* Host Tips */}
-        <div className="host-section">
+        <div className="host-section tips-section">
           <div className="host-tips">
-            <h4>Host Tips:</h4>
+            <h4>Host Tips</h4>
             <ul>
-              <li>Review participants before approving them</li>
+              <li>Review participant names before approving them</li>
               <li>You can remove disruptive participants anytime</li>
-              <li>If you leave, another participant will become host</li>
-              <li>Use the chat to communicate with everyone</li>
+              <li>If you leave, host privileges transfer automatically</li>
+              <li>Use chat to communicate with all participants</li>
+              {hasWaitingParticipants && (
+                <li className="urgent-tip">
+                  <FaExclamationTriangle /> Participants are waiting for your
+                  approval!
+                </li>
+              )}
             </ul>
           </div>
         </div>

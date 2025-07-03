@@ -29,13 +29,14 @@ const Room = () => {
   const [connectionStatus, setConnectionStatus] = useState("Connecting...");
 
   // Room state management
-  const [roomState, setRoomState] = useState("connecting"); // connecting, waiting, approved, denied
+  const [roomState, setRoomState] = useState("connecting");
   const [isHost, setIsHost] = useState(false);
   const [waitingParticipants, setWaitingParticipants] = useState([]);
 
   // Chat state
   const [chatMessages, setChatMessages] = useState([]);
   const [typingUsers, setTypingUsers] = useState([]);
+  const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
 
   // Notifications
   const [notifications, setNotifications] = useState([]);
@@ -45,9 +46,7 @@ const Room = () => {
   const userVideo = useRef();
   const peersRef = useRef({});
   const streamRef = useRef();
-  const typingTimeoutRef = useRef();
 
-  // Redirect if no username is provided
   useEffect(() => {
     if (!username) {
       navigate("/");
@@ -65,7 +64,6 @@ const Room = () => {
     try {
       setConnectionStatus("Getting media...");
 
-      // Get media stream first
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 1280, max: 1920 },
@@ -82,20 +80,17 @@ const Room = () => {
       setStream(mediaStream);
       streamRef.current = mediaStream;
 
-      // Set local video
       if (userVideo.current) {
         userVideo.current.srcObject = mediaStream;
-        userVideo.current.muted = true; // Prevent feedback
+        userVideo.current.muted = true;
       }
 
       setConnectionStatus("Connecting to server...");
 
-      // Initialize socket connection
       socketRef.current = io(API_URL, {
         transports: ["websocket", "polling"],
       });
 
-      // Initialize PeerJS - Use the free cloud server
       peerRef.current = new Peer({
         config: {
           iceServers: [
@@ -108,10 +103,7 @@ const Room = () => {
         debug: 1,
       });
 
-      // Setup socket event listeners
       setupSocketEvents(mediaStream);
-
-      // Setup peer event listeners
       setupPeerEvents(mediaStream);
     } catch (error) {
       console.error("Error initializing connection:", error);
@@ -130,7 +122,6 @@ const Room = () => {
       setConnectionStatus("Connected to server");
     });
 
-    // Handle admission status
     socketRef.current.on(
       "admission-status",
       ({ status, isHost: hostStatus, chatMessages: messages, message }) => {
@@ -159,27 +150,36 @@ const Room = () => {
       }
     );
 
-    // Handle waiting room updates (for host)
+    // Enhanced waiting room handling
     socketRef.current.on(
       "waiting-room-update",
       ({ waitingParticipants: waiting }) => {
+        console.log("Waiting room update:", waiting);
         setWaitingParticipants(waiting || []);
+
+        // Auto-open host controls if there are waiting participants and it's closed
+        if (isHost && waiting && waiting.length > 0 && !showHostControls) {
+          setShowHostControls(true);
+          addNotification(
+            `${waiting.length} participant(s) waiting for approval`,
+            "info"
+          );
+        }
       }
     );
 
-    // Handle new participant waiting (for host)
     socketRef.current.on(
       "participant-waiting",
       ({ username: waitingUsername }) => {
         addNotification(`${waitingUsername} is waiting to join`, "info");
-        // Auto-open host controls if closed
-        if (isHost && !showHostControls) {
+
+        // Force open host controls for immediate attention
+        if (isHost) {
           setShowHostControls(true);
         }
       }
     );
 
-    // Handle participant approval notifications
     socketRef.current.on(
       "participant-approved",
       ({ username: approvedUsername, message }) => {
@@ -201,12 +201,14 @@ const Room = () => {
       }
     );
 
-    // Handle host transfer
     socketRef.current.on(
       "host-transferred",
       ({ isHost: newHostStatus, message }) => {
         setIsHost(newHostStatus);
         addNotification(message, "success");
+        if (newHostStatus) {
+          setShowHostControls(true);
+        }
       }
     );
 
@@ -214,7 +216,6 @@ const Room = () => {
       addNotification(message, "info");
     });
 
-    // Existing participant management events
     socketRef.current.on(
       "user-joined",
       ({ participantId, username: newUsername, peerId: newPeerId }) => {
@@ -320,12 +321,13 @@ const Room = () => {
       }
     );
 
-    // Chat events
+    // Enhanced chat events
     socketRef.current.on("new-message", (message) => {
       setChatMessages((prev) => [...prev, message]);
 
-      // Show notification if chat is closed and message is not from current user
+      // Show notification and mark as unread if chat is closed and message is not from current user
       if (!showChat && message.username !== username) {
+        setHasUnreadMessages(true);
         addNotification(
           `${message.username}: ${message.message.substring(0, 50)}${
             message.message.length > 50 ? "..." : ""
@@ -335,7 +337,6 @@ const Room = () => {
       }
     });
 
-    // Typing events
     socketRef.current.on("user-typing", ({ username: typingUsername }) => {
       setTypingUsers((prev) => {
         if (!prev.includes(typingUsername)) {
@@ -361,7 +362,6 @@ const Room = () => {
       setPeerId(id);
       setConnectionStatus("Joining room...");
 
-      // Join the room with socket and peer info
       socketRef.current.emit("join-room", {
         roomId,
         username,
@@ -521,7 +521,6 @@ const Room = () => {
     }
   };
 
-  // UI event handlers
   const toggleAudio = () => {
     if (streamRef.current) {
       const audioTracks = streamRef.current.getAudioTracks();
@@ -541,8 +540,12 @@ const Room = () => {
     }
   };
 
+  // Enhanced video toggle with proper cleanup
   const toggleVideo = async () => {
+    console.log("Toggling video. Current state:", videoEnabled);
+
     if (!videoEnabled) {
+      // Starting video
       try {
         const newStream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -559,8 +562,12 @@ const Room = () => {
 
         const oldStream = streamRef.current;
 
+        // Stop old tracks properly
         if (oldStream) {
-          oldStream.getTracks().forEach((track) => track.stop());
+          oldStream.getTracks().forEach((track) => {
+            track.stop();
+            console.log(`Stopped track: ${track.kind}`);
+          });
         }
 
         streamRef.current = newStream;
@@ -570,6 +577,7 @@ const Room = () => {
           userVideo.current.srcObject = newStream;
         }
 
+        // Update peer connections with new stream
         Object.values(peersRef.current).forEach((call) => {
           if (call && call.peerConnection) {
             const videoTrack = newStream.getVideoTracks()[0];
@@ -580,9 +588,9 @@ const Room = () => {
             senders.forEach((sender) => {
               if (sender.track) {
                 if (sender.track.kind === "video" && videoTrack) {
-                  sender.replaceTrack(videoTrack);
+                  sender.replaceTrack(videoTrack).catch(console.error);
                 } else if (sender.track.kind === "audio" && audioTrack) {
-                  sender.replaceTrack(audioTrack);
+                  sender.replaceTrack(audioTrack).catch(console.error);
                 }
               }
             });
@@ -590,6 +598,7 @@ const Room = () => {
         });
 
         setVideoEnabled(true);
+        console.log("Video enabled successfully");
       } catch (error) {
         console.error("Error getting video stream:", error);
         addNotification(
@@ -599,12 +608,17 @@ const Room = () => {
         return;
       }
     } else {
+      // Stopping video
       if (streamRef.current) {
         const videoTracks = streamRef.current.getVideoTracks();
+
+        // Stop video tracks completely
         videoTracks.forEach((track) => {
           track.stop();
+          console.log("Stopped video track");
         });
 
+        // Create audio-only stream
         const audioTracks = streamRef.current.getAudioTracks();
         const audioOnlyStream = new MediaStream(audioTracks);
 
@@ -615,21 +629,24 @@ const Room = () => {
           userVideo.current.srcObject = audioOnlyStream;
         }
 
+        // Update peer connections to remove video track
         Object.values(peersRef.current).forEach((call) => {
           if (call && call.peerConnection) {
             const senders = call.peerConnection.getSenders();
             senders.forEach((sender) => {
               if (sender.track && sender.track.kind === "video") {
-                sender.replaceTrack(null);
+                sender.replaceTrack(null).catch(console.error);
               }
             });
           }
         });
 
         setVideoEnabled(false);
+        console.log("Video disabled successfully");
       }
     }
 
+    // Notify other participants
     if (socketRef.current) {
       socketRef.current.emit("toggle-video", {
         roomId,
@@ -644,7 +661,6 @@ const Room = () => {
     navigate("/");
   };
 
-  // Host controls
   const approveParticipant = (participantId) => {
     if (socketRef.current) {
       socketRef.current.emit("approve-participant", { roomId, participantId });
@@ -672,7 +688,6 @@ const Room = () => {
     }
   };
 
-  // Chat functions
   const sendMessage = (message) => {
     if (socketRef.current && message.trim()) {
       socketRef.current.emit("send-message", {
@@ -680,6 +695,14 @@ const Room = () => {
         message: message.trim(),
         username,
       });
+    }
+  };
+
+  // Enhanced chat toggle with unread message handling
+  const toggleChat = () => {
+    setShowChat(!showChat);
+    if (!showChat) {
+      setHasUnreadMessages(false);
     }
   };
 
@@ -700,25 +723,21 @@ const Room = () => {
       });
   };
 
-  // Notification system
   const addNotification = (message, type = "info") => {
     const id = Date.now();
     setNotifications((prev) => [...prev, { id, message, type }]);
 
-    // Auto remove after 5 seconds
     setTimeout(() => {
       setNotifications((prev) => prev.filter((notif) => notif.id !== id));
     }, 5000);
   };
 
-  // Show waiting room if user is waiting for approval
   if (roomState === "waiting") {
     return (
       <WaitingRoom roomId={roomId} username={username} onLeave={leaveRoom} />
     );
   }
 
-  // Show main room interface only if approved
   if (roomState !== "approved") {
     return (
       <div className="room connecting">
@@ -732,7 +751,7 @@ const Room = () => {
 
   return (
     <div className="room">
-      {/* Notifications */}
+      {/* Enhanced Notifications */}
       {notifications.length > 0 && (
         <div className="notifications">
           {notifications.map((notif) => (
@@ -748,7 +767,13 @@ const Room = () => {
           <h2>Meeting: {roomId}</h2>
           <div className="connection-status">
             {connectionStatus}
-            {isHost && <span className="host-indicator">👑 Host</span>}
+            {isHost && <span className="host-indicator"> 👑 Host</span>}
+            {waitingParticipants.length > 0 && isHost && (
+              <span className="waiting-indicator">
+                {" "}
+                | ⏳ {waitingParticipants.length} waiting
+              </span>
+            )}
           </div>
         </div>
         <div className="header-controls">
@@ -762,7 +787,6 @@ const Room = () => {
       </div>
 
       <div className="participants-container">
-        {/* Current user's video */}
         <div className="participant-wrapper">
           <Participant
             username={`${username} (You)`}
@@ -775,7 +799,6 @@ const Room = () => {
           />
         </div>
 
-        {/* Other participants */}
         {Object.values(participants).map((participant) => (
           <div className="participant-wrapper" key={participant.peerId}>
             <Participant
@@ -789,7 +812,6 @@ const Room = () => {
         ))}
       </div>
 
-      {/* No participants message */}
       {Object.keys(participants).length === 0 && (
         <div className="no-participants-message">
           <p>Share the room ID with others to start the meeting!</p>
@@ -797,7 +819,6 @@ const Room = () => {
         </div>
       )}
 
-      {/* Controls */}
       <Controls
         audioEnabled={audioEnabled}
         videoEnabled={videoEnabled}
@@ -806,7 +827,7 @@ const Room = () => {
         leaveRoom={leaveRoom}
         toggleParticipants={() => setShowParticipants(!showParticipants)}
         participantsCount={Object.keys(participants).length + 1}
-        onToggleChat={() => setShowChat(!showChat)}
+        onToggleChat={toggleChat}
         onToggleHostControls={
           isHost ? () => setShowHostControls(!showHostControls) : null
         }
@@ -814,10 +835,9 @@ const Room = () => {
         waitingCount={waitingParticipants.length}
         showChat={showChat}
         showHostControls={showHostControls}
-        hasUnreadMessages={chatMessages.length > 0 && !showChat}
+        hasUnreadMessages={hasUnreadMessages}
       />
 
-      {/* Participants list sidebar */}
       {showParticipants && (
         <ParticipantsList
           participants={[
@@ -832,7 +852,6 @@ const Room = () => {
         />
       )}
 
-      {/* Chat sidebar */}
       {showChat && (
         <Chat
           isOpen={showChat}
@@ -845,7 +864,6 @@ const Room = () => {
         />
       )}
 
-      {/* Host controls sidebar */}
       {isHost && showHostControls && (
         <HostControls
           isOpen={showHostControls}
