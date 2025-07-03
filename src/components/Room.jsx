@@ -5,6 +5,9 @@ import Peer from "peerjs";
 import Controls from "./Controls";
 import Participant from "./Participant";
 import ParticipantsList from "./ParticipantsList";
+import WaitingRoom from "./WaitingRoom";
+import Chat from "./Chat";
+import HostControls from "./HostControls";
 import "./Room.css";
 
 const API_URL = "https://conference-b.onrender.com";
@@ -20,14 +23,29 @@ const Room = () => {
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [showParticipants, setShowParticipants] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [showHostControls, setShowHostControls] = useState(false);
   const [peerId, setPeerId] = useState("");
   const [connectionStatus, setConnectionStatus] = useState("Connecting...");
+
+  // Room state management
+  const [roomState, setRoomState] = useState("connecting"); // connecting, waiting, approved, denied
+  const [isHost, setIsHost] = useState(false);
+  const [waitingParticipants, setWaitingParticipants] = useState([]);
+
+  // Chat state
+  const [chatMessages, setChatMessages] = useState([]);
+  const [typingUsers, setTypingUsers] = useState([]);
+
+  // Notifications
+  const [notifications, setNotifications] = useState([]);
 
   const socketRef = useRef();
   const peerRef = useRef();
   const userVideo = useRef();
   const peersRef = useRef({});
   const streamRef = useRef();
+  const typingTimeoutRef = useRef();
 
   // Redirect if no username is provided
   useEffect(() => {
@@ -77,7 +95,7 @@ const Room = () => {
         transports: ["websocket", "polling"],
       });
 
-      // Initialize PeerJS - Use the free cloud server (NO local server needed)
+      // Initialize PeerJS - Use the free cloud server
       peerRef.current = new Peer({
         config: {
           iceServers: [
@@ -87,7 +105,7 @@ const Room = () => {
             { urls: "stun:stun.relay.metered.ca:80" },
           ],
         },
-        debug: 1, // Reduce debug logs
+        debug: 1,
       });
 
       // Setup socket event listeners
@@ -98,10 +116,11 @@ const Room = () => {
     } catch (error) {
       console.error("Error initializing connection:", error);
       setConnectionStatus("Failed to connect");
-      alert(
-        "Failed to access camera/microphone. Please check permissions and try again."
+      addNotification(
+        "Failed to access camera/microphone. Please check permissions.",
+        "error"
       );
-      navigate("/");
+      setTimeout(() => navigate("/"), 3000);
     }
   };
 
@@ -111,6 +130,91 @@ const Room = () => {
       setConnectionStatus("Connected to server");
     });
 
+    // Handle admission status
+    socketRef.current.on(
+      "admission-status",
+      ({ status, isHost: hostStatus, chatMessages: messages, message }) => {
+        console.log("Admission status:", status);
+
+        if (status === "approved") {
+          setRoomState("approved");
+          setIsHost(hostStatus || false);
+          setConnectionStatus("Connected");
+          if (messages) {
+            setChatMessages(messages);
+          }
+          if (hostStatus) {
+            addNotification("You are the host of this meeting", "success");
+          } else {
+            addNotification("Welcome to the meeting!", "success");
+          }
+        } else if (status === "waiting") {
+          setRoomState("waiting");
+          setConnectionStatus("Waiting for approval");
+        } else if (status === "denied") {
+          setRoomState("denied");
+          addNotification(message || "Access denied by host", "error");
+          setTimeout(() => navigate("/"), 3000);
+        }
+      }
+    );
+
+    // Handle waiting room updates (for host)
+    socketRef.current.on(
+      "waiting-room-update",
+      ({ waitingParticipants: waiting }) => {
+        setWaitingParticipants(waiting || []);
+      }
+    );
+
+    // Handle new participant waiting (for host)
+    socketRef.current.on(
+      "participant-waiting",
+      ({ username: waitingUsername }) => {
+        addNotification(`${waitingUsername} is waiting to join`, "info");
+        // Auto-open host controls if closed
+        if (isHost && !showHostControls) {
+          setShowHostControls(true);
+        }
+      }
+    );
+
+    // Handle participant approval notifications
+    socketRef.current.on(
+      "participant-approved",
+      ({ username: approvedUsername, message }) => {
+        addNotification(message, "success");
+      }
+    );
+
+    socketRef.current.on(
+      "participant-removed",
+      ({ username: removedUsername, message }) => {
+        addNotification(message, "warning");
+      }
+    );
+
+    socketRef.current.on(
+      "participant-left",
+      ({ username: leftUsername, message }) => {
+        addNotification(message, "info");
+      }
+    );
+
+    // Handle host transfer
+    socketRef.current.on(
+      "host-transferred",
+      ({ isHost: newHostStatus, message }) => {
+        setIsHost(newHostStatus);
+        addNotification(message, "success");
+      }
+    );
+
+    socketRef.current.on("host-changed", ({ newHostUsername, message }) => {
+      addNotification(message, "info");
+    });
+
+    // Existing participant management events
     socketRef.current.on(
       "user-joined",
       ({ participantId, username: newUsername, peerId: newPeerId }) => {
@@ -122,7 +226,6 @@ const Room = () => {
           peerRef.current &&
           peerRef.current.open
         ) {
-          // Small delay to ensure both peers are ready
           setTimeout(() => {
             makeCall(newPeerId, newUsername, streamRef.current);
           }, 1000);
@@ -135,7 +238,6 @@ const Room = () => {
       ({ participants: existingParticipants }) => {
         console.log("Existing participants:", existingParticipants);
 
-        // Connect to existing participants
         Object.values(existingParticipants).forEach((participant) => {
           if (participant.peerId && participant.peerId !== peerId) {
             setTimeout(() => {
@@ -152,7 +254,7 @@ const Room = () => {
 
     socketRef.current.on(
       "user-left",
-      ({ peerId: leftPeerId, participantId }) => {
+      ({ peerId: leftPeerId, participantId, username: leftUsername }) => {
         console.log(`User left: ${leftPeerId}`);
 
         if (leftPeerId && peersRef.current[leftPeerId]) {
@@ -194,27 +296,62 @@ const Room = () => {
       }
     );
 
-    socketRef.current.on("you-were-removed", () => {
-      alert("You have been removed from the meeting by the host");
-      leaveRoom();
+    socketRef.current.on("you-were-removed", ({ message }) => {
+      addNotification(
+        message || "You have been removed from the meeting",
+        "error"
+      );
+      setTimeout(() => navigate("/"), 3000);
     });
 
-    socketRef.current.on("user-removed", ({ peerId: removedPeerId }) => {
-      if (removedPeerId && peersRef.current[removedPeerId]) {
-        peersRef.current[removedPeerId].close();
-        delete peersRef.current[removedPeerId];
-      }
+    socketRef.current.on(
+      "user-removed",
+      ({ peerId: removedPeerId, username: removedUsername }) => {
+        if (removedPeerId && peersRef.current[removedPeerId]) {
+          peersRef.current[removedPeerId].close();
+          delete peersRef.current[removedPeerId];
+        }
 
-      setParticipants((prev) => {
-        const newParticipants = { ...prev };
-        delete newParticipants[removedPeerId];
-        return newParticipants;
+        setParticipants((prev) => {
+          const newParticipants = { ...prev };
+          delete newParticipants[removedPeerId];
+          return newParticipants;
+        });
+      }
+    );
+
+    // Chat events
+    socketRef.current.on("new-message", (message) => {
+      setChatMessages((prev) => [...prev, message]);
+
+      // Show notification if chat is closed and message is not from current user
+      if (!showChat && message.username !== username) {
+        addNotification(
+          `${message.username}: ${message.message.substring(0, 50)}${
+            message.message.length > 50 ? "..." : ""
+          }`,
+          "info"
+        );
+      }
+    });
+
+    // Typing events
+    socketRef.current.on("user-typing", ({ username: typingUsername }) => {
+      setTypingUsers((prev) => {
+        if (!prev.includes(typingUsername)) {
+          return [...prev, typingUsername];
+        }
+        return prev;
       });
     });
 
+    socketRef.current.on("user-stopped-typing", () => {
+      setTypingUsers([]);
+    });
+
     socketRef.current.on("room-error", ({ message }) => {
-      alert(`Error: ${message}`);
-      navigate("/");
+      addNotification(`Error: ${message}`, "error");
+      setTimeout(() => navigate("/"), 3000);
     });
   };
 
@@ -230,14 +367,11 @@ const Room = () => {
         username,
         peerId: id,
       });
-
-      setConnectionStatus("Connected");
     });
 
     peerRef.current.on("call", (call) => {
       console.log("Receiving call from:", call.peer);
 
-      // Answer the call with our stream
       call.answer(streamRef.current);
 
       call.on("stream", (remoteStream) => {
@@ -261,11 +395,9 @@ const Room = () => {
       console.error("Peer error:", error);
       setConnectionStatus("Peer connection error");
 
-      // Try to reconnect after a delay
       setTimeout(() => {
         if (peerRef.current.destroyed) {
           console.log("Attempting to recreate peer connection...");
-          // Recreate peer if destroyed
           initializePeer(mediaStream);
         }
       }, 3000);
@@ -368,31 +500,28 @@ const Room = () => {
   const cleanup = () => {
     console.log("Cleaning up connections...");
 
-    // Stop all media tracks
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => {
         track.stop();
       });
     }
 
-    // Close all peer connections
     Object.values(peersRef.current).forEach((call) => {
       if (call && call.close) {
         call.close();
       }
     });
 
-    // Destroy peer connection
     if (peerRef.current && !peerRef.current.destroyed) {
       peerRef.current.destroy();
     }
 
-    // Disconnect socket
     if (socketRef.current) {
       socketRef.current.disconnect();
     }
   };
 
+  // UI event handlers
   const toggleAudio = () => {
     if (streamRef.current) {
       const audioTracks = streamRef.current.getAudioTracks();
@@ -412,10 +541,8 @@ const Room = () => {
     }
   };
 
-  // FIXED: Proper video toggle that actually stops/starts the camera
   const toggleVideo = async () => {
     if (!videoEnabled) {
-      // Turning video ON - get new video stream
       try {
         const newStream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -430,27 +557,21 @@ const Room = () => {
           },
         });
 
-        // Replace the old stream
         const oldStream = streamRef.current;
 
-        // Stop old tracks
         if (oldStream) {
           oldStream.getTracks().forEach((track) => track.stop());
         }
 
-        // Set new stream
         streamRef.current = newStream;
         setStream(newStream);
 
-        // Update local video
         if (userVideo.current) {
           userVideo.current.srcObject = newStream;
         }
 
-        // Update all peer connections with new stream
         Object.values(peersRef.current).forEach((call) => {
           if (call && call.peerConnection) {
-            // Replace tracks in existing peer connections
             const videoTrack = newStream.getVideoTracks()[0];
             const audioTrack = newStream.getAudioTracks()[0];
 
@@ -471,30 +592,29 @@ const Room = () => {
         setVideoEnabled(true);
       } catch (error) {
         console.error("Error getting video stream:", error);
-        alert("Failed to access camera. Please check permissions.");
+        addNotification(
+          "Failed to access camera. Please check permissions.",
+          "error"
+        );
         return;
       }
     } else {
-      // Turning video OFF - stop video tracks
       if (streamRef.current) {
         const videoTracks = streamRef.current.getVideoTracks();
         videoTracks.forEach((track) => {
-          track.stop(); // Actually stop the camera
+          track.stop();
         });
 
-        // Create a new stream with only audio
         const audioTracks = streamRef.current.getAudioTracks();
         const audioOnlyStream = new MediaStream(audioTracks);
 
         streamRef.current = audioOnlyStream;
         setStream(audioOnlyStream);
 
-        // Update local video
         if (userVideo.current) {
           userVideo.current.srcObject = audioOnlyStream;
         }
 
-        // Update all peer connections
         Object.values(peersRef.current).forEach((call) => {
           if (call && call.peerConnection) {
             const senders = call.peerConnection.getSenders();
@@ -510,7 +630,6 @@ const Room = () => {
       }
     }
 
-    // Notify other participants
     if (socketRef.current) {
       socketRef.current.emit("toggle-video", {
         roomId,
@@ -523,6 +642,19 @@ const Room = () => {
   const leaveRoom = () => {
     cleanup();
     navigate("/");
+  };
+
+  // Host controls
+  const approveParticipant = (participantId) => {
+    if (socketRef.current) {
+      socketRef.current.emit("approve-participant", { roomId, participantId });
+    }
+  };
+
+  const denyParticipant = (participantId) => {
+    if (socketRef.current) {
+      socketRef.current.emit("deny-participant", { roomId, participantId });
+    }
   };
 
   const removeParticipantHandler = (participantId) => {
@@ -540,30 +672,84 @@ const Room = () => {
     }
   };
 
+  // Chat functions
+  const sendMessage = (message) => {
+    if (socketRef.current && message.trim()) {
+      socketRef.current.emit("send-message", {
+        roomId,
+        message: message.trim(),
+        username,
+      });
+    }
+  };
+
   const copyRoomId = () => {
     navigator.clipboard
       .writeText(roomId)
       .then(() => {
-        alert("Room ID copied to clipboard");
+        addNotification("Room ID copied to clipboard", "success");
       })
       .catch(() => {
-        // Fallback
         const textarea = document.createElement("textarea");
         textarea.value = roomId;
         document.body.appendChild(textarea);
         textarea.select();
         document.execCommand("copy");
         document.body.removeChild(textarea);
-        alert("Room ID copied to clipboard");
+        addNotification("Room ID copied to clipboard", "success");
       });
   };
 
+  // Notification system
+  const addNotification = (message, type = "info") => {
+    const id = Date.now();
+    setNotifications((prev) => [...prev, { id, message, type }]);
+
+    // Auto remove after 5 seconds
+    setTimeout(() => {
+      setNotifications((prev) => prev.filter((notif) => notif.id !== id));
+    }, 5000);
+  };
+
+  // Show waiting room if user is waiting for approval
+  if (roomState === "waiting") {
+    return (
+      <WaitingRoom roomId={roomId} username={username} onLeave={leaveRoom} />
+    );
+  }
+
+  // Show main room interface only if approved
+  if (roomState !== "approved") {
+    return (
+      <div className="room connecting">
+        <div className="connecting-message">
+          <h2>{connectionStatus}</h2>
+          <div className="spinner"></div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="room">
+      {/* Notifications */}
+      {notifications.length > 0 && (
+        <div className="notifications">
+          {notifications.map((notif) => (
+            <div key={notif.id} className={`notification ${notif.type}`}>
+              {notif.message}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="room-header">
         <div>
           <h2>Meeting: {roomId}</h2>
-          <div className="connection-status">{connectionStatus}</div>
+          <div className="connection-status">
+            {connectionStatus}
+            {isHost && <span className="host-indicator">👑 Host</span>}
+          </div>
         </div>
         <div className="header-controls">
           {peerId && (
@@ -603,7 +789,7 @@ const Room = () => {
         ))}
       </div>
 
-      {/* Show message if no other participants */}
+      {/* No participants message */}
       {Object.keys(participants).length === 0 && (
         <div className="no-participants-message">
           <p>Share the room ID with others to start the meeting!</p>
@@ -620,6 +806,15 @@ const Room = () => {
         leaveRoom={leaveRoom}
         toggleParticipants={() => setShowParticipants(!showParticipants)}
         participantsCount={Object.keys(participants).length + 1}
+        onToggleChat={() => setShowChat(!showChat)}
+        onToggleHostControls={
+          isHost ? () => setShowHostControls(!showHostControls) : null
+        }
+        isHost={isHost}
+        waitingCount={waitingParticipants.length}
+        showChat={showChat}
+        showHostControls={showHostControls}
+        hasUnreadMessages={chatMessages.length > 0 && !showChat}
       />
 
       {/* Participants list sidebar */}
@@ -633,7 +828,48 @@ const Room = () => {
             })),
           ]}
           onClose={() => setShowParticipants(false)}
-          onRemove={removeParticipantHandler}
+          onRemove={isHost ? removeParticipantHandler : null}
+        />
+      )}
+
+      {/* Chat sidebar */}
+      {showChat && (
+        <Chat
+          isOpen={showChat}
+          onClose={() => setShowChat(false)}
+          messages={chatMessages}
+          onSendMessage={sendMessage}
+          currentUsername={username}
+          isHost={isHost}
+          typingUsers={typingUsers}
+        />
+      )}
+
+      {/* Host controls sidebar */}
+      {isHost && showHostControls && (
+        <HostControls
+          isOpen={showHostControls}
+          onClose={() => setShowHostControls(false)}
+          waitingParticipants={waitingParticipants}
+          onApprove={approveParticipant}
+          onDeny={denyParticipant}
+          currentParticipants={[
+            {
+              id: "self",
+              username: `${username} (You)`,
+              isHost: true,
+              audioEnabled,
+              videoEnabled,
+            },
+            ...Object.values(participants).map((p) => ({
+              id: p.id,
+              username: p.username,
+              isHost: false,
+              audioEnabled: p.audioEnabled,
+              videoEnabled: p.videoEnabled,
+            })),
+          ]}
+          onRemoveParticipant={removeParticipantHandler}
         />
       )}
     </div>

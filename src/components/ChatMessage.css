@@ -1,0 +1,156 @@
+.chat-message {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.own-message {
+  flex-direction: row-reverse;
+}
+
+.message-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: #2d8cff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: bold;
+  color: white;
+  flex-shrink: 0;
+  align-self: flex-end;
+}
+
+.own-avatar {
+  background-color: #4caf50;
+}
+
+.message-content {
+  max-width: 70%;
+  display: flex;
+  flex-direction: column;
+}
+
+.own-message .message-content {
+  align-items: flex-end;
+}
+
+.message-sender {
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 4px;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.message-bubble {
+  background-color: #333;
+  border-radius: 18px;
+  padding: 10px 14px;
+  position: relative;
+  word-wrap: break-word;
+  max-width: 100%;
+}
+
+.own-message .message-bubble {
+  background-color: #2d8cff;
+  color: white;
+}
+
+.other-message .message-bubble {
+  background-color: #333;
+  color: white;
+}
+
+.message-text {
+  font-size: 14px;
+  line-height: 1.4;
+  margin-bottom: 4px;
+  white-space: pre-wrap;
+}
+
+.message-text a {
+  color: #87ceeb;
+  text-decoration: underline;
+}
+
+.own-message .message-text a {
+  color: #e3f2fd;
+}
+
+.message-time {
+  font-size: 10px;
+  opacity: 0.7;
+  text-align: right;
+  margin-top: 2px;
+}
+
+.other-message .message-time {
+  color: #aaa;
+}
+
+.own-message .message-time {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* Message bubble tails */
+.message-bubble::before {
+  content: "";
+  position: absolute;
+  width: 0;
+  height: 0;
+  bottom: 0;
+}
+
+.other-message .message-bubble::before {
+  left: -6px;
+  border-right: 6px solid #333;
+  border-bottom: 6px solid transparent;
+}
+
+.own-message .message-bubble::before {
+  right: -6px;
+  border-left: 6px solid #2d8cff;
+  border-bottom: 6px solid transparent;
+}
+
+/* Long message handling */
+.message-text {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .message-content {
+    max-width: 85%;
+  }
+
+  .message-avatar {
+    width: 28px;
+    height: 28px;
+    font-size: 11px;
+  }
+
+  .message-bubble {
+    padding: 8px 12px;
+  }
+
+  .message-text {
+    font-size: 13px;
+  }
+}

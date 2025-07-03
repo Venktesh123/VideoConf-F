@@ -5,6 +5,7 @@
   padding: 15px;
   background-color: #1e1e1e;
   border-top: 1px solid #333;
+  flex-wrap: wrap;
 }
 
 .control-button {
@@ -20,6 +21,8 @@
   padding: 10px 15px;
   min-width: 80px;
   transition: all 0.2s ease;
+  position: relative;
+  cursor: pointer;
 }
 
 .control-button span {
@@ -29,16 +32,216 @@
 
 .control-button:hover {
   background-color: #333;
+  transform: translateY(-2px);
 }
 
 .control-button-off {
   color: #ff5d5d;
+  background-color: rgba(255, 93, 93, 0.1);
+}
+
+.control-button-off:hover {
+  background-color: rgba(255, 93, 93, 0.2);
+}
+
+.control-button-active {
+  background-color: #2d8cff;
+  color: white;
+}
+
+.control-button-active:hover {
+  background-color: #1a7bef;
+}
+
+.control-button-host {
+  background: linear-gradient(135deg, #ffd700 0%, #ffb347 100%);
+  color: #1e1e1e;
+  font-weight: 600;
+}
+
+.control-button-host:hover {
+  background: linear-gradient(135deg, #ffed4e 0%, #ffc66d 100%);
+  transform: translateY(-2px);
+}
+
+.control-button-host.control-button-active {
+  background: linear-gradient(135deg, #ff9800 0%, #ff6f00 100%);
+  color: white;
 }
 
 .control-button-danger {
   background-color: #ff5d5d;
+  color: white;
 }
 
 .control-button-danger:hover {
   background-color: #ff3c3c;
+  transform: translateY(-2px);
+}
+
+/* Notification indicators */
+.has-notification {
+  animation: pulse-notification 2s infinite;
+}
+
+@keyframes pulse-notification {
+  0% {
+    box-shadow: 0 0 0 0 rgba(45, 140, 255, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(45, 140, 255, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(45, 140, 255, 0);
+  }
+}
+
+.notification-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  background-color: #ff4444;
+  border-radius: 50%;
+  border: 2px solid #1e1e1e;
+  animation: blink 1s infinite;
+}
+
+.notification-badge {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  background-color: #ff4444;
+  color: white;
+  border-radius: 10px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: bold;
+  min-width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #1e1e1e;
+  animation: bounce 0.5s ease;
+}
+
+@keyframes blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  51%,
+  100% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes bounce {
+  0% {
+    transform: scale(0);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 768px) {
+  .controls {
+    gap: 10px;
+    padding: 10px;
+    justify-content: space-around;
+  }
+
+  .control-button {
+    min-width: 65px;
+    padding: 8px 10px;
+    gap: 6px;
+  }
+
+  .control-button span {
+    font-size: 10px;
+  }
+
+  .notification-badge {
+    top: 3px;
+    right: 3px;
+    font-size: 8px;
+    min-width: 14px;
+    height: 14px;
+    padding: 1px 4px;
+  }
+
+  .notification-dot {
+    top: 6px;
+    right: 6px;
+    width: 6px;
+    height: 6px;
+  }
+}
+
+@media (max-width: 480px) {
+  .controls {
+    gap: 8px;
+    padding: 8px;
+    flex-wrap: wrap;
+  }
+
+  .control-button {
+    min-width: 55px;
+    padding: 6px 8px;
+    gap: 4px;
+  }
+
+  .control-button span {
+    font-size: 9px;
+  }
+
+  /* Stack controls in two rows on very small screens */
+  .controls {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    max-width: 300px;
+    margin: 0 auto;
+  }
+}
+
+/* Special styles for different control states */
+.control-button.control-button-host.has-notification {
+  animation: pulse-host 2s infinite;
+}
+
+@keyframes pulse-host {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(255, 215, 0, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 215, 0, 0);
+  }
+}
+
+/* Tooltip styles for mobile */
+@media (hover: none) and (pointer: coarse) {
+  .control-button:active {
+    transform: scale(0.95);
+  }
+}
+
+/* Focus styles for accessibility */
+.control-button:focus {
+  outline: 2px solid #2d8cff;
+  outline-offset: 2px;
+}
+
+.control-button:focus:not(:focus-visible) {
+  outline: none;
 }

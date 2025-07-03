@@ -13,6 +13,8 @@
   padding: 15px 20px;
   background-color: #1e1e1e;
   border-bottom: 1px solid #333;
+  position: relative;
+  z-index: 5;
 }
 
 .room-header > div:first-child h2 {
@@ -110,6 +112,32 @@
   grid-auto-rows: minmax(200px, 1fr);
 }
 
+/* No participants message */
+.no-participants-message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: #888;
+  z-index: 1;
+}
+
+.no-participants-message p {
+  margin: 10px 0;
+  font-size: 16px;
+}
+
+/* Adjust layout when panels are open */
+.room:has(.chat-panel) .participants-container,
+.room:has(.participants-list) .participants-container {
+  margin-right: 350px;
+}
+
+.room:has(.waiting-room-panel) .participants-container {
+  margin-right: 400px;
+}
+
 /* Mobile responsive adjustments */
 @media (max-width: 768px) {
   .participants-container {
@@ -117,6 +145,7 @@
     grid-auto-rows: minmax(200px, 1fr);
     gap: 8px;
     padding: 8px;
+    margin-right: 0 !important; /* Override panel margins on mobile */
   }
 
   .participant-wrapper {
@@ -147,6 +176,13 @@
 
   .peer-id {
     font-size: 10px;
+  }
+
+  /* On mobile, panels take full screen */
+  .room:has(.chat-panel) .participants-container,
+  .room:has(.participants-list) .participants-container,
+  .room:has(.waiting-room-panel) .participants-container {
+    display: none; /* Hide main content when panels are open on mobile */
   }
 }
 
