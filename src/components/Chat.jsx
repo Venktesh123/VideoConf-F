@@ -1,11 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import {
-  FaComments,
-  FaTimes,
-  FaPaperPlane,
-  FaCrown,
-  FaEllipsisV,
-} from "react-icons/fa";
+import { FaComments, FaTimes, FaPaperPlane, FaCrown } from "react-icons/fa";
 import "./Chat.css";
 
 const Chat = ({
@@ -31,30 +25,51 @@ const Chat = ({
   // Focus input when chat opens
   useEffect(() => {
     if (isOpen && inputRef.current) {
-      inputRef.current.focus();
+      setTimeout(() => {
+        inputRef.current.focus();
+      }, 100);
     }
   }, [isOpen]);
 
+  // Cleanup typing timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
   };
 
   const handleSendMessage = (e) => {
     e.preventDefault();
-    if (message.trim()) {
-      onSendMessage(message.trim());
+
+    const trimmedMessage = message.trim();
+    if (trimmedMessage && trimmedMessage.length > 0) {
+      onSendMessage(trimmedMessage);
       setMessage("");
       setIsTyping(false);
+
+      // Clear typing timeout
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
     }
   };
 
   const handleInputChange = (e) => {
-    setMessage(e.target.value);
+    const newMessage = e.target.value;
+    setMessage(newMessage);
 
     // Handle typing indicators
-    if (!isTyping) {
+    if (newMessage.trim().length > 0 && !isTyping) {
       setIsTyping(true);
-      // Emit typing start event (would be handled by parent)
+      // Note: In a real implementation, you would emit typing-start event here
     }
 
     // Clear existing timeout
@@ -63,25 +78,56 @@ const Chat = ({
     }
 
     // Set new timeout to stop typing
-    typingTimeoutRef.current = setTimeout(() => {
+    if (newMessage.trim().length > 0) {
+      typingTimeoutRef.current = setTimeout(() => {
+        setIsTyping(false);
+        // Note: In a real implementation, you would emit typing-stop event here
+      }, 1000);
+    } else {
       setIsTyping(false);
-      // Emit typing stop event (would be handled by parent)
-    }, 1000);
+    }
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage(e);
+    }
   };
 
   const formatTime = (timestamp) => {
-    return new Date(timestamp).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    try {
+      const date = new Date(timestamp);
+      return date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch (error) {
+      return "";
+    }
   };
 
   const isConsecutiveMessage = (currentMsg, prevMsg) => {
-    if (!prevMsg) return false;
-    return (
-      currentMsg.senderId === prevMsg.senderId &&
-      new Date(currentMsg.timestamp) - new Date(prevMsg.timestamp) < 60000
-    ); // 1 minute
+    if (!prevMsg || !currentMsg) return false;
+
+    try {
+      return (
+        currentMsg.senderId === prevMsg.senderId &&
+        new Date(currentMsg.timestamp) - new Date(prevMsg.timestamp) < 60000 // 1 minute
+      );
+    } catch (error) {
+      return false;
+    }
+  };
+
+  const sanitizeMessage = (msg) => {
+    // Basic HTML sanitization
+    return msg
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#x27;");
   };
 
   if (!isOpen) return null;
@@ -96,7 +142,12 @@ const Chat = ({
             <span className="message-count">({messages.length})</span>
           )}
         </div>
-        <button className="chat-close-button" onClick={onClose}>
+        <button
+          className="chat-close-button"
+          onClick={onClose}
+          type="button"
+          aria-label="Close chat"
+        >
           <FaTimes />
         </button>
       </div>
@@ -111,10 +162,11 @@ const Chat = ({
         ) : (
           <>
             {messages.map((msg, index) => {
+              if (!msg || !msg.id) return null;
+
               const prevMsg = index > 0 ? messages[index - 1] : null;
               const isConsecutive = isConsecutiveMessage(msg, prevMsg);
-              const isOwnMessage =
-                msg.senderId === "self" || msg.username === currentUsername;
+              const isOwnMessage = msg.username === currentUsername;
 
               return (
                 <div
@@ -134,13 +186,15 @@ const Chat = ({
                       </span>
                     </div>
                   )}
-                  <div className="message-content">{msg.message}</div>
+                  <div className="message-content">
+                    {sanitizeMessage(msg.message)}
+                  </div>
                 </div>
               );
             })}
 
             {/* Typing indicators */}
-            {typingUsers.length > 0 && (
+            {typingUsers && typingUsers.length > 0 && (
               <div className="typing-indicators">
                 <div className="typing-message">
                   <div className="typing-dots">
@@ -169,14 +223,18 @@ const Chat = ({
             type="text"
             value={message}
             onChange={handleInputChange}
+            onKeyPress={handleKeyPress}
             placeholder="Type a message..."
             className="chat-input"
             maxLength={500}
+            disabled={!onSendMessage}
+            autoComplete="off"
           />
           <button
             type="submit"
             className="send-button"
-            disabled={!message.trim()}
+            disabled={!message.trim() || !onSendMessage}
+            aria-label="Send message"
           >
             <FaPaperPlane />
           </button>

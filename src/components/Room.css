@@ -1,21 +1,23 @@
 .room {
-  height: 100%;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   position: relative;
   background-color: #121212;
+  overflow: hidden;
 }
 
-/* Enhanced notifications */
+/* Enhanced notifications - Fixed positioning */
 .notifications {
   position: fixed;
   top: 20px;
   right: 20px;
-  z-index: 1000;
+  z-index: 2000;
   display: flex;
   flex-direction: column;
   gap: 10px;
   max-width: 400px;
+  pointer-events: none;
 }
 
 .notification {
@@ -27,25 +29,27 @@
   animation: slideInRight 0.3s ease-out;
   position: relative;
   border-left: 4px solid transparent;
+  pointer-events: auto;
+  backdrop-filter: blur(10px);
 }
 
 .notification.info {
-  background-color: #2d8cff;
+  background-color: rgba(45, 140, 255, 0.95);
   border-left-color: #1a7bef;
 }
 
 .notification.success {
-  background-color: #4caf50;
+  background-color: rgba(76, 175, 80, 0.95);
   border-left-color: #388e3c;
 }
 
 .notification.warning {
-  background-color: #ff9800;
+  background-color: rgba(255, 152, 0, 0.95);
   border-left-color: #f57c00;
 }
 
 .notification.error {
-  background-color: #f44336;
+  background-color: rgba(244, 67, 54, 0.95);
   border-left-color: #d32f2f;
 }
 
@@ -69,6 +73,7 @@
   border-bottom: 1px solid #333;
   position: relative;
   z-index: 5;
+  flex-shrink: 0;
 }
 
 .room-header > div:first-child h2 {
@@ -137,6 +142,7 @@
   background-color: #1a7bef;
 }
 
+/* Fixed participants container - prevents overlap */
 .participants-container {
   flex: 1;
   display: grid;
@@ -146,6 +152,7 @@
   padding: 10px;
   overflow: auto;
   background-color: #121212;
+  transition: margin-right 0.3s ease;
 }
 
 .participant-wrapper {
@@ -199,6 +206,7 @@
   text-align: center;
   color: #888;
   z-index: 1;
+  pointer-events: none;
 }
 
 .no-participants-message p {
@@ -215,6 +223,10 @@
 .connecting-message {
   text-align: center;
   color: white;
+  background-color: #1e1e1e;
+  padding: 40px;
+  border-radius: 10px;
+  border: 1px solid #333;
 }
 
 .connecting-message h2 {
@@ -229,7 +241,7 @@
   border-top: 4px solid #2d8cff;
   border-radius: 50%;
   animation: spin 1s linear infinite;
-  margin: 0 auto;
+  margin: 20px auto;
 }
 
 @keyframes spin {
@@ -241,14 +253,47 @@
   }
 }
 
-/* Adjust layout when panels are open */
-.room:has(.chat-container) .participants-container,
-.room:has(.participants-list) .participants-container {
+/* Fixed panel layout to prevent overlapping */
+.room:has(.chat-container) .participants-container {
   margin-right: 350px;
+}
+
+.room:has(.participants-list) .participants-container {
+  margin-right: 300px;
 }
 
 .room:has(.host-controls-container) .participants-container {
   margin-right: 380px;
+}
+
+/* Prevent multiple panels from overlapping */
+.room:has(.chat-container):has(.host-controls-container)
+  .participants-container {
+  margin-right: 350px;
+}
+
+.room:has(.chat-container):has(.host-controls-container) .chat-container {
+  right: 380px;
+}
+
+.room:has(.participants-list):has(.host-controls-container)
+  .participants-container {
+  margin-right: 380px;
+}
+
+.room:has(.participants-list):has(.host-controls-container) .participants-list {
+  right: 380px;
+}
+
+/* Controls at bottom - Fixed positioning */
+.controls {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  background-color: #1e1e1e;
+  border-top: 1px solid #333;
 }
 
 /* Mobile responsive adjustments */
@@ -271,6 +316,7 @@
     gap: 8px;
     padding: 8px;
     margin-right: 0 !important;
+    margin-bottom: 80px; /* Space for controls */
   }
 
   .participant-wrapper {
@@ -308,11 +354,19 @@
     font-size: 10px;
   }
 
-  /* On mobile, panels take full screen */
+  /* On mobile, panels take full screen and hide participants */
   .room:has(.chat-container) .participants-container,
   .room:has(.participants-list) .participants-container,
   .room:has(.host-controls-container) .participants-container {
     display: none;
+  }
+
+  /* Reset panel positioning on mobile */
+  .room:has(.chat-container) .chat-container,
+  .room:has(.participants-list) .participants-list,
+  .room:has(.host-controls-container) .host-controls-container {
+    right: 0;
+    width: 100%;
   }
 }
 
@@ -324,6 +378,7 @@
   .participants-container {
     padding: 5px;
     gap: 5px;
+    margin-bottom: 90px; /* More space for mobile controls */
   }
 
   .participant-wrapper {
@@ -337,7 +392,7 @@
   }
 }
 
-/* Enhanced host controls visibility */
+/* Enhanced host controls visibility with urgency */
 .room:has(.host-controls-container.urgent) .participants-container {
   margin-right: 380px;
   transition: margin-right 0.3s ease;
@@ -349,4 +404,48 @@
   padding: 2px 8px;
   border-radius: 12px;
   border: 1px solid #ff9800;
+}
+
+/* Ensure proper z-index layering */
+.room {
+  z-index: 1;
+}
+
+.controls {
+  z-index: 10;
+}
+
+.participants-list,
+.chat-container {
+  z-index: 15;
+}
+
+.host-controls-container {
+  z-index: 20;
+}
+
+.notifications {
+  z-index: 2000;
+}
+
+/* Prevent text selection in UI elements */
+.room-header,
+.controls,
+.participant-wrapper {
+  user-select: none;
+}
+
+/* Smooth transitions for all layout changes */
+.participants-container,
+.chat-container,
+.host-controls-container,
+.participants-list {
+  transition: all 0.3s ease;
+}
+
+/* Fix for participant grid responsiveness */
+@media (min-width: 769px) {
+  .participants-container {
+    margin-bottom: 80px; /* Space for controls */
+  }
 }
