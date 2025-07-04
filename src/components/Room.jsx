@@ -18,6 +18,11 @@ const Room = () => {
   const navigate = useNavigate();
   const { username } = location.state || {};
 
+  // Debug states
+  const [debugSteps, setDebugSteps] = useState([]);
+  const [currentStep, setCurrentStep] = useState("initializing");
+  const [detailedStatus, setDetailedStatus] = useState("Starting...");
+
   const [participants, setParticipants] = useState({});
   const [stream, setStream] = useState(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
@@ -47,42 +52,172 @@ const Room = () => {
   const peersRef = useRef({});
   const streamRef = useRef();
   const connectionEstablished = useRef(false);
-  const initializationRef = useRef(false); // Prevent multiple initializations
+  const initializationRef = useRef(false);
+
+  // Debug helper function
+  const addDebugStep = (step, status, details = "") => {
+    const timestamp = new Date().toLocaleTimeString();
+    const debugInfo = { step, status, details, timestamp };
+    console.log(`🔍 DEBUG [${timestamp}]: ${step} - ${status}`, details);
+    setDebugSteps((prev) => [...prev, debugInfo]);
+    setCurrentStep(step);
+    setDetailedStatus(`${step}: ${status}`);
+  };
+
+  // Test server connectivity first
+  const testServerConnection = async () => {
+    try {
+      addDebugStep("server-test", "testing", "Checking server connectivity...");
+
+      const response = await fetch(`${API_URL}/health`, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        addDebugStep(
+          "server-test",
+          "success",
+          `Server is healthy: ${JSON.stringify(data)}`
+        );
+        return true;
+      } else {
+        addDebugStep(
+          "server-test",
+          "error",
+          `Server returned ${response.status}: ${response.statusText}`
+        );
+        return false;
+      }
+    } catch (error) {
+      addDebugStep(
+        "server-test",
+        "error",
+        `Server connection failed: ${error.message}`
+      );
+      return false;
+    }
+  };
+
+  // Test room existence
+  const testRoomExists = async () => {
+    try {
+      addDebugStep(
+        "room-test",
+        "testing",
+        `Checking if room ${roomId} exists...`
+      );
+
+      const response = await fetch(`${API_URL}/api/room/${roomId}`);
+
+      if (response.ok) {
+        const data = await response.json();
+        addDebugStep(
+          "room-test",
+          "success",
+          `Room exists: ${JSON.stringify(data)}`
+        );
+        return true;
+      } else if (response.status === 404) {
+        addDebugStep("room-test", "error", "Room not found");
+        return false;
+      } else {
+        addDebugStep(
+          "room-test",
+          "error",
+          `Room check failed: ${response.status}`
+        );
+        return false;
+      }
+    } catch (error) {
+      addDebugStep("room-test", "error", `Room check error: ${error.message}`);
+      return false;
+    }
+  };
 
   useEffect(() => {
+    // Initial validation
     if (!username) {
-      addNotification("Username is required", "error");
+      addDebugStep("validation", "error", "Username is missing");
       navigate("/");
       return;
     }
 
     if (!roomId) {
-      addNotification("Room ID is required", "error");
+      addDebugStep("validation", "error", "Room ID is missing");
       navigate("/");
       return;
     }
 
-    // Prevent multiple initializations
     if (initializationRef.current) {
-      console.log("Already initializing, skipping...");
+      addDebugStep(
+        "validation",
+        "warning",
+        "Already initializing, skipping..."
+      );
       return;
     }
 
+    addDebugStep(
+      "validation",
+      "success",
+      `Username: ${username}, Room: ${roomId}`
+    );
     initializationRef.current = true;
-    console.log("🚀 Starting room initialization...");
 
-    initializeConnection();
+    // Start the connection process
+    startConnectionProcess();
 
     return () => {
-      console.log("🧹 Cleaning up room...");
+      addDebugStep("cleanup", "info", "Cleaning up...");
       cleanup();
     };
-  }, []); // Remove dependencies to prevent re-initialization
+  }, [username, roomId, navigate]);
 
-  const initializeConnection = async () => {
+  const startConnectionProcess = async () => {
     try {
-      console.log("📱 Requesting media access...");
-      setConnectionStatus("Getting camera and microphone...");
+      // Step 1: Test server connectivity
+      const serverOk = await testServerConnection();
+      if (!serverOk) {
+        addNotification(
+          "Cannot connect to server. Please check your internet connection.",
+          "error"
+        );
+        setTimeout(() => navigate("/"), 5000);
+        return;
+      }
+
+      // Step 2: Test room existence
+      const roomExists = await testRoomExists();
+      if (!roomExists) {
+        addNotification(
+          "Room does not exist. Please check the room ID.",
+          "error"
+        );
+        setTimeout(() => navigate("/"), 3000);
+        return;
+      }
+
+      // Step 3: Get media access
+      await initializeMedia();
+
+      // Step 4: Initialize connections
+      await initializeConnections();
+    } catch (error) {
+      addDebugStep("connection-process", "error", error.message);
+      addNotification(`Connection failed: ${error.message}`, "error");
+    }
+  };
+
+  const initializeMedia = async () => {
+    try {
+      addDebugStep(
+        "media",
+        "requesting",
+        "Requesting camera and microphone access..."
+      );
+      setConnectionStatus("Requesting camera and microphone...");
 
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -97,7 +232,12 @@ const Room = () => {
         },
       });
 
-      console.log("✅ Media access granted");
+      addDebugStep(
+        "media",
+        "success",
+        `Got media stream with ${mediaStream.getTracks().length} tracks`
+      );
+
       setStream(mediaStream);
       streamRef.current = mediaStream;
 
@@ -106,179 +246,223 @@ const Room = () => {
         userVideo.current.muted = true;
       }
 
-      setConnectionStatus("Connecting to server...");
-      console.log("🔌 Initializing socket connection...");
+      // Test if video is actually working
+      const videoTracks = mediaStream.getVideoTracks();
+      const audioTracks = mediaStream.getAudioTracks();
 
-      // Initialize Socket connection with timeout
-      socketRef.current = io(API_URL, {
-        transports: ["websocket", "polling"],
-        reconnection: true,
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000,
-        timeout: 10000, // 10 second timeout
-      });
+      addDebugStep(
+        "media",
+        "info",
+        `Video tracks: ${videoTracks.length}, Audio tracks: ${audioTracks.length}`
+      );
 
-      // Initialize Peer connection
-      console.log("🔗 Initializing peer connection...");
-      peerRef.current = new Peer(undefined, {
-        config: {
-          iceServers: [
-            { urls: "stun:stun.l.google.com:19302" },
-            { urls: "stun:stun1.l.google.com:19302" },
-            { urls: "stun:stun2.l.google.com:19302" },
-            { urls: "stun:stun.relay.metered.ca:80" },
-          ],
-        },
-        debug: 1,
-      });
-
-      setupSocketEvents();
-      setupPeerEvents();
-
-      // Add connection timeout
-      setTimeout(() => {
-        if (roomState === "connecting") {
-          console.error("❌ Connection timeout");
-          addNotification("Connection timeout. Please try again.", "error");
-          setConnectionStatus("Connection failed");
-          setTimeout(() => navigate("/"), 3000);
-        }
-      }, 30000); // 30 second timeout
-    } catch (error) {
-      console.error("❌ Error initializing connection:", error);
-      setConnectionStatus("Failed to connect");
-
-      if (error.name === "NotAllowedError") {
-        addNotification(
-          "Camera/microphone access denied. Please allow access and refresh the page.",
-          "error"
-        );
-      } else if (error.name === "NotFoundError") {
-        addNotification(
-          "No camera or microphone found. Please check your devices.",
-          "error"
-        );
-      } else {
-        addNotification(
-          `Failed to access camera/microphone: ${error.message}`,
-          "error"
+      if (videoTracks.length > 0) {
+        addDebugStep(
+          "media",
+          "info",
+          `Video track enabled: ${videoTracks[0].enabled}`
         );
       }
 
-      setTimeout(() => navigate("/"), 5000);
+      if (audioTracks.length > 0) {
+        addDebugStep(
+          "media",
+          "info",
+          `Audio track enabled: ${audioTracks[0].enabled}`
+        );
+      }
+    } catch (error) {
+      addDebugStep("media", "error", error.message);
+
+      let errorMessage = "Failed to access camera/microphone: ";
+      if (error.name === "NotAllowedError") {
+        errorMessage += "Permission denied. Please allow access and refresh.";
+      } else if (error.name === "NotFoundError") {
+        errorMessage += "No camera or microphone found.";
+      } else {
+        errorMessage += error.message;
+      }
+
+      throw new Error(errorMessage);
     }
   };
 
-  const setupSocketEvents = () => {
-    if (!socketRef.current) return;
+  const initializeConnections = async () => {
+    return new Promise((resolve, reject) => {
+      try {
+        // Initialize Socket
+        addDebugStep("socket", "connecting", "Connecting to server...");
+        setConnectionStatus("Connecting to server...");
 
-    socketRef.current.on("connect", () => {
-      console.log("✅ Socket connected:", socketRef.current.id);
-      setConnectionStatus("Connected to server");
+        socketRef.current = io(API_URL, {
+          transports: ["websocket", "polling"],
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
+          timeout: 10000,
+        });
+
+        // Socket event handlers
+        socketRef.current.on("connect", () => {
+          addDebugStep(
+            "socket",
+            "success",
+            `Connected with ID: ${socketRef.current.id}`
+          );
+          setConnectionStatus("Connected to server");
+        });
+
+        socketRef.current.on("connect_error", (error) => {
+          addDebugStep("socket", "error", `Connection error: ${error.message}`);
+          reject(new Error(`Socket connection failed: ${error.message}`));
+        });
+
+        socketRef.current.on("disconnect", (reason) => {
+          addDebugStep("socket", "warning", `Disconnected: ${reason}`);
+        });
+
+        // Initialize Peer
+        addDebugStep("peer", "connecting", "Initializing peer connection...");
+
+        peerRef.current = new Peer(undefined, {
+          config: {
+            iceServers: [
+              { urls: "stun:stun.l.google.com:19302" },
+              { urls: "stun:stun1.l.google.com:19302" },
+              { urls: "stun:stun2.l.google.com:19302" },
+            ],
+          },
+          debug: 1,
+        });
+
+        peerRef.current.on("open", (id) => {
+          addDebugStep("peer", "success", `Peer connected with ID: ${id}`);
+          setPeerId(id);
+          setConnectionStatus("Joining room...");
+
+          // Now join the room
+          addDebugStep(
+            "room-join",
+            "attempting",
+            "Sending join-room request..."
+          );
+
+          socketRef.current.emit("join-room", {
+            roomId,
+            username,
+            peerId: id,
+          });
+
+          // Set a timeout for room joining
+          setTimeout(() => {
+            if (roomState === "connecting") {
+              addDebugStep(
+                "room-join",
+                "timeout",
+                "Room join timeout - no response from server"
+              );
+              reject(new Error("Room join timeout"));
+            }
+          }, 15000);
+        });
+
+        peerRef.current.on("error", (error) => {
+          addDebugStep("peer", "error", `Peer error: ${error.message}`);
+          reject(new Error(`Peer connection failed: ${error.message}`));
+        });
+
+        // Setup all socket events
+        setupSocketEvents(resolve, reject);
+
+        // Overall timeout
+        setTimeout(() => {
+          if (roomState === "connecting") {
+            addDebugStep("timeout", "error", "Overall connection timeout");
+            reject(new Error("Connection timeout"));
+          }
+        }, 30000);
+      } catch (error) {
+        addDebugStep("initialization", "error", error.message);
+        reject(error);
+      }
     });
+  };
 
-    socketRef.current.on("disconnect", (reason) => {
-      console.log("❌ Socket disconnected:", reason);
-      setConnectionStatus("Disconnected from server");
-      addNotification("Disconnected from server", "error");
-    });
-
-    socketRef.current.on("connect_error", (error) => {
-      console.error("❌ Socket connection error:", error);
-      setConnectionStatus("Connection failed");
-      addNotification("Failed to connect to server", "error");
-    });
-
-    // Handle admission status - ENHANCED ERROR HANDLING
+  const setupSocketEvents = (resolve, reject) => {
+    // Handle admission status
     socketRef.current.on(
       "admission-status",
       ({ status, isHost: hostStatus, chatMessages: messages, message }) => {
-        console.log(
-          "📨 Admission status received:",
-          status,
-          "isHost:",
-          hostStatus
+        addDebugStep(
+          "admission",
+          "received",
+          `Status: ${status}, Host: ${hostStatus}`
         );
 
         if (status === "approved") {
-          console.log("✅ Access approved, joining room...");
+          addDebugStep(
+            "admission",
+            "success",
+            "Access approved - joining meeting"
+          );
           setRoomState("approved");
           setIsHost(hostStatus || false);
           setConnectionStatus("Connected");
           connectionEstablished.current = true;
 
-          // Set chat messages if available
           if (messages && Array.isArray(messages)) {
             setChatMessages(messages);
           }
 
-          // Show appropriate notifications
           if (hostStatus) {
             addNotification("You are the host of this meeting", "success");
-            setTimeout(() => {
-              setShowHostControls(true);
-            }, 1000);
           } else {
             addNotification("Welcome to the meeting!", "success");
           }
+
+          resolve();
         } else if (status === "waiting") {
-          console.log("⏳ Waiting for host approval...");
+          addDebugStep("admission", "waiting", "Waiting for host approval");
           setRoomState("waiting");
           setConnectionStatus("Waiting for host approval");
+          resolve(); // This is also a successful state
         } else if (status === "denied") {
-          console.log("❌ Access denied by host");
+          addDebugStep("admission", "denied", message || "Access denied");
           setRoomState("denied");
           addNotification(message || "Access denied by host", "error");
           setTimeout(() => navigate("/"), 3000);
+          resolve(); // Even denial is a resolved state
         }
       }
     );
 
-    // Enhanced error handling
+    // Handle room errors
     socketRef.current.on("room-error", ({ message }) => {
-      console.error("❌ Room error:", message);
-      addNotification(`Room error: ${message}`, "error");
-      setConnectionStatus("Room error");
-      setTimeout(() => navigate("/"), 3000);
+      addDebugStep("room-error", "error", message);
+      reject(new Error(`Room error: ${message}`));
     });
 
-    // Handle waiting room updates
+    // Handle other events
     socketRef.current.on(
       "waiting-room-update",
       ({ waitingParticipants: waiting }) => {
-        console.log("📋 Waiting room update received:", waiting);
+        addDebugStep(
+          "waiting-room",
+          "update",
+          `${waiting?.length || 0} participants waiting`
+        );
         setWaitingParticipants(waiting || []);
-
-        if (isHost && waiting && waiting.length > 0) {
-          if (!showHostControls) {
-            setShowHostControls(true);
-          }
-          addNotification(
-            `${waiting.length} participant(s) waiting for approval`,
-            "warning"
-          );
-        }
       }
     );
 
-    // Handle new participant waiting
-    socketRef.current.on(
-      "participant-waiting",
-      ({ username: waitingUsername, participantId, peerId: waitingPeerId }) => {
-        console.log("👤 New participant waiting:", waitingUsername);
-        addNotification(`${waitingUsername} is waiting to join`, "info");
-
-        if (isHost) {
-          setShowHostControls(true);
-        }
-      }
-    );
-
-    // Handle participant events
     socketRef.current.on(
       "user-joined",
       ({ participantId, username: newUsername, peerId: newPeerId }) => {
-        console.log(`👤 User joined: ${newUsername} (${newPeerId})`);
+        addDebugStep(
+          "user-joined",
+          "info",
+          `${newUsername} joined with peer ID ${newPeerId}`
+        );
         addNotification(`${newUsername} joined the meeting`, "success");
 
         if (
@@ -287,9 +471,7 @@ const Room = () => {
           peerRef.current &&
           connectionEstablished.current
         ) {
-          setTimeout(() => {
-            makeCall(newPeerId, newUsername);
-          }, 1000);
+          setTimeout(() => makeCall(newPeerId, newUsername), 1000);
         }
       }
     );
@@ -297,24 +479,32 @@ const Room = () => {
     socketRef.current.on(
       "room-participants",
       ({ participants: existingParticipants }) => {
-        console.log("👥 Existing participants:", existingParticipants);
+        addDebugStep(
+          "existing-participants",
+          "info",
+          `Found ${
+            Object.keys(existingParticipants || {}).length
+          } existing participants`
+        );
 
         if (existingParticipants && connectionEstablished.current) {
           Object.values(existingParticipants).forEach((participant) => {
             if (participant.peerId && participant.peerId !== peerId) {
-              setTimeout(() => {
-                makeCall(participant.peerId, participant.username);
-              }, 2000);
+              setTimeout(
+                () => makeCall(participant.peerId, participant.username),
+                2000
+              );
             }
           });
         }
       }
     );
 
+    // Additional socket events...
     socketRef.current.on(
       "user-left",
-      ({ peerId: leftPeerId, participantId, username: leftUsername }) => {
-        console.log(`👋 User left: ${leftPeerId}`);
+      ({ peerId: leftPeerId, username: leftUsername }) => {
+        addDebugStep("user-left", "info", `${leftUsername} left`);
         addNotification(`${leftUsername} left the meeting`, "info");
 
         if (leftPeerId && peersRef.current[leftPeerId]) {
@@ -330,15 +520,13 @@ const Room = () => {
       }
     );
 
+    // Audio/Video toggles
     socketRef.current.on(
       "user-toggle-audio",
       ({ peerId: remotePeerId, enabled }) => {
         setParticipants((prev) => ({
           ...prev,
-          [remotePeerId]: {
-            ...prev[remotePeerId],
-            audioEnabled: enabled,
-          },
+          [remotePeerId]: { ...prev[remotePeerId], audioEnabled: enabled },
         }));
       }
     );
@@ -348,204 +536,71 @@ const Room = () => {
       ({ peerId: remotePeerId, enabled }) => {
         setParticipants((prev) => ({
           ...prev,
-          [remotePeerId]: {
-            ...prev[remotePeerId],
-            videoEnabled: enabled,
-          },
+          [remotePeerId]: { ...prev[remotePeerId], videoEnabled: enabled },
         }));
       }
     );
 
-    // Handle removal events
-    socketRef.current.on("you-were-removed", ({ message }) => {
-      addNotification(
-        message || "You have been removed from the meeting",
-        "error"
-      );
-      setTimeout(() => navigate("/"), 3000);
-    });
-
-    socketRef.current.on(
-      "user-removed",
-      ({ peerId: removedPeerId, username: removedUsername }) => {
-        addNotification(
-          `${removedUsername} was removed from the meeting`,
-          "warning"
-        );
-
-        if (removedPeerId && peersRef.current[removedPeerId]) {
-          peersRef.current[removedPeerId].close();
-          delete peersRef.current[removedPeerId];
-        }
-
-        setParticipants((prev) => {
-          const newParticipants = { ...prev };
-          delete newParticipants[removedPeerId];
-          return newParticipants;
-        });
-      }
-    );
-
-    // Handle host events
-    socketRef.current.on(
-      "host-transferred",
-      ({ isHost: newHostStatus, message }) => {
-        console.log("👑 Host transferred:", newHostStatus);
-        setIsHost(newHostStatus);
-        addNotification(message, "success");
-        if (newHostStatus) {
-          setShowHostControls(true);
-        } else {
-          setShowHostControls(false);
-        }
-      }
-    );
-
-    socketRef.current.on("host-changed", ({ newHostUsername, message }) => {
-      addNotification(message, "info");
-    });
-
-    // Handle chat events
+    // Chat events
     socketRef.current.on("new-message", (message) => {
       setChatMessages((prev) => [...prev, message]);
-
       if (!showChat && message.username !== username) {
         setHasUnreadMessages(true);
         addNotification(
-          `${message.username}: ${message.message.substring(0, 30)}${
-            message.message.length > 30 ? "..." : ""
-          }`,
+          `${message.username}: ${message.message.substring(0, 30)}`,
           "info"
         );
       }
     });
 
-    socketRef.current.on("user-typing", ({ username: typingUsername }) => {
-      setTypingUsers((prev) => {
-        if (!prev.includes(typingUsername)) {
-          return [...prev, typingUsername];
-        }
-        return prev;
-      });
-    });
-
-    socketRef.current.on("user-stopped-typing", () => {
-      setTypingUsers([]);
-    });
-
-    // Handle approval events
+    // Host events
     socketRef.current.on(
-      "participant-approved",
-      ({ username: approvedUsername, message }) => {
+      "host-transferred",
+      ({ isHost: newHostStatus, message }) => {
+        setIsHost(newHostStatus);
         addNotification(message, "success");
       }
     );
-
-    socketRef.current.on(
-      "participant-removed",
-      ({ username: removedUsername, message }) => {
-        addNotification(message, "warning");
-      }
-    );
-
-    socketRef.current.on(
-      "participant-left",
-      ({ username: leftUsername, message }) => {
-        addNotification(message, "info");
-      }
-    );
-  };
-
-  const setupPeerEvents = () => {
-    if (!peerRef.current) return;
-
-    peerRef.current.on("open", (id) => {
-      console.log("🔗 Peer connected with ID:", id);
-      setPeerId(id);
-      setConnectionStatus("Joining room...");
-
-      // Join room with socket
-      if (socketRef.current && socketRef.current.connected) {
-        console.log("📤 Emitting join-room event...");
-        socketRef.current.emit("join-room", {
-          roomId,
-          username,
-          peerId: id,
-        });
-      } else {
-        console.error("❌ Socket not connected when trying to join room");
-        addNotification("Connection error. Please refresh the page.", "error");
-      }
-    });
-
-    peerRef.current.on("call", (call) => {
-      console.log("📞 Receiving call from:", call.peer);
-
-      call.answer(streamRef.current);
-
-      call.on("stream", (remoteStream) => {
-        console.log("📡 Received remote stream from:", call.peer);
-        addParticipant(call.peer, remoteStream, call);
-      });
-
-      call.on("close", () => {
-        console.log("📞 Call closed from:", call.peer);
-        removeParticipant(call.peer);
-      });
-
-      call.on("error", (error) => {
-        console.error("❌ Call error:", error);
-        removeParticipant(call.peer);
-      });
-
-      peersRef.current[call.peer] = call;
-    });
-
-    peerRef.current.on("error", (error) => {
-      console.error("❌ Peer error:", error);
-      setConnectionStatus("Peer connection error");
-      addNotification("Peer connection failed", "error");
-    });
-
-    peerRef.current.on("disconnected", () => {
-      console.log("🔗 Peer disconnected, attempting to reconnect...");
-      if (!peerRef.current.destroyed) {
-        peerRef.current.reconnect();
-      }
-    });
   };
 
   const makeCall = (remotePeerId, remoteUsername) => {
-    console.log("📞 Making call to:", remotePeerId);
+    addDebugStep(
+      "call",
+      "making",
+      `Calling ${remoteUsername} (${remotePeerId})`
+    );
 
     if (
       !peerRef.current ||
       !peerRef.current.open ||
       peersRef.current[remotePeerId]
     ) {
-      console.log("⚠️ Cannot make call - peer not ready or already connected");
+      addDebugStep("call", "skipped", "Peer not ready or already connected");
       return;
     }
 
     const call = peerRef.current.call(remotePeerId, streamRef.current);
-
     if (!call) {
-      console.error("❌ Failed to create call to:", remotePeerId);
+      addDebugStep("call", "error", "Failed to create call");
       return;
     }
 
     call.on("stream", (remoteStream) => {
-      console.log("📡 Received stream from called peer:", remotePeerId);
+      addDebugStep(
+        "call",
+        "stream-received",
+        `Got stream from ${remoteUsername}`
+      );
       addParticipant(remotePeerId, remoteStream, call, remoteUsername);
     });
 
     call.on("close", () => {
-      console.log("📞 Call closed to:", remotePeerId);
+      addDebugStep("call", "closed", `Call closed with ${remoteUsername}`);
       removeParticipant(remotePeerId);
     });
 
     call.on("error", (error) => {
-      console.error("❌ Call error to", remotePeerId, ":", error);
+      addDebugStep("call", "error", `Call error: ${error.message}`);
       removeParticipant(remotePeerId);
     });
 
@@ -571,7 +626,6 @@ const Room = () => {
     if (peersRef.current[peerId]) {
       delete peersRef.current[peerId];
     }
-
     setParticipants((prev) => {
       const newParticipants = { ...prev };
       delete newParticipants[peerId];
@@ -580,20 +634,16 @@ const Room = () => {
   };
 
   const cleanup = () => {
-    console.log("🧹 Cleaning up connections...");
+    addDebugStep("cleanup", "starting", "Cleaning up connections...");
     connectionEstablished.current = false;
     initializationRef.current = false;
 
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => {
-        track.stop();
-      });
+      streamRef.current.getTracks().forEach((track) => track.stop());
     }
 
     Object.values(peersRef.current).forEach((call) => {
-      if (call && call.close) {
-        call.close();
-      }
+      if (call && call.close) call.close();
     });
 
     if (peerRef.current && !peerRef.current.destroyed) {
@@ -605,15 +655,14 @@ const Room = () => {
     }
   };
 
+  // Control functions
   const toggleAudio = () => {
     if (streamRef.current) {
       const audioTracks = streamRef.current.getAudioTracks();
       audioTracks.forEach((track) => {
         track.enabled = !audioEnabled;
       });
-
       setAudioEnabled(!audioEnabled);
-
       if (socketRef.current) {
         socketRef.current.emit("toggle-audio", {
           roomId,
@@ -625,15 +674,14 @@ const Room = () => {
   };
 
   const toggleVideo = async () => {
-    console.log("🎥 Toggling video. Current state:", videoEnabled);
-
+    // Similar implementation as before but with debug logging
     if (!videoEnabled) {
-      // Starting video
       try {
+        addDebugStep("video", "enabling", "Starting video...");
         const newStream = await navigator.mediaDevices.getUserMedia({
           video: {
-            width: { ideal: 1280, max: 1920 },
-            height: { ideal: 720, max: 1080 },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
             facingMode: "user",
           },
           audio: {
@@ -643,24 +691,21 @@ const Room = () => {
           },
         });
 
-        // Stop old stream
         if (streamRef.current) {
           streamRef.current.getTracks().forEach((track) => track.stop());
         }
 
         streamRef.current = newStream;
         setStream(newStream);
-
         if (userVideo.current) {
           userVideo.current.srcObject = newStream;
         }
 
-        // Update all peer connections
+        // Update peer connections
         Object.values(peersRef.current).forEach((call) => {
           if (call && call.peerConnection) {
             const videoTrack = newStream.getVideoTracks()[0];
             const audioTrack = newStream.getAudioTracks()[0];
-
             const senders = call.peerConnection.getSenders();
             senders.forEach((sender) => {
               if (sender.track) {
@@ -675,16 +720,17 @@ const Room = () => {
         });
 
         setVideoEnabled(true);
+        addDebugStep("video", "enabled", "Video started successfully");
       } catch (error) {
-        console.error("❌ Error getting video stream:", error);
-        addNotification(
-          "Failed to access camera. Please check permissions.",
-          "error"
+        addDebugStep(
+          "video",
+          "error",
+          `Failed to enable video: ${error.message}`
         );
-        return;
+        addNotification("Failed to access camera", "error");
       }
     } else {
-      // Stopping video
+      addDebugStep("video", "disabling", "Stopping video...");
       if (streamRef.current) {
         const videoTracks = streamRef.current.getVideoTracks();
         videoTracks.forEach((track) => track.stop());
@@ -694,12 +740,11 @@ const Room = () => {
 
         streamRef.current = audioOnlyStream;
         setStream(audioOnlyStream);
-
         if (userVideo.current) {
           userVideo.current.srcObject = audioOnlyStream;
         }
-
         setVideoEnabled(false);
+        addDebugStep("video", "disabled", "Video stopped");
       }
     }
 
@@ -717,34 +762,24 @@ const Room = () => {
     navigate("/");
   };
 
-  // Host control functions
+  // Host control functions (simplified for debugging)
   const approveParticipant = (participantId) => {
-    console.log("✅ Approving participant:", participantId);
     if (socketRef.current && isHost) {
       socketRef.current.emit("approve-participant", { roomId, participantId });
       addNotification("Participant approved", "success");
-    } else {
-      addNotification("Only the host can approve participants", "error");
     }
   };
 
   const denyParticipant = (participantId) => {
-    console.log("❌ Denying participant:", participantId);
     if (socketRef.current && isHost) {
       socketRef.current.emit("deny-participant", { roomId, participantId });
       addNotification("Participant denied", "info");
-    } else {
-      addNotification("Only the host can deny participants", "error");
     }
   };
 
   const removeParticipantHandler = (participantId) => {
-    if (!isHost) {
-      addNotification("Only the host can remove participants", "error");
-      return;
-    }
-
-    if (window.confirm("Are you sure you want to remove this participant?")) {
+    if (!isHost) return;
+    if (window.confirm("Remove participant?")) {
       const participant = Object.values(participants).find(
         (p) => p.id === participantId
       );
@@ -754,7 +789,6 @@ const Room = () => {
           participantId,
           peerId: participant?.peerId,
         });
-        addNotification("Participant removed", "info");
       }
     }
   };
@@ -771,9 +805,7 @@ const Room = () => {
 
   const toggleChat = () => {
     setShowChat(!showChat);
-    if (!showChat) {
-      setHasUnreadMessages(false);
-    }
+    if (!showChat) setHasUnreadMessages(false);
   };
 
   const toggleHostControls = () => {
@@ -788,7 +820,7 @@ const Room = () => {
     navigator.clipboard
       .writeText(roomId)
       .then(() => {
-        addNotification("Room ID copied to clipboard", "success");
+        addNotification("Room ID copied", "success");
       })
       .catch(() => {
         const textarea = document.createElement("textarea");
@@ -797,26 +829,17 @@ const Room = () => {
         textarea.select();
         document.execCommand("copy");
         document.body.removeChild(textarea);
-        addNotification("Room ID copied to clipboard", "success");
+        addNotification("Room ID copied", "success");
       });
   };
 
   const addNotification = (message, type = "info") => {
     const id = Date.now();
     setNotifications((prev) => [...prev, { id, message, type }]);
-
     setTimeout(() => {
       setNotifications((prev) => prev.filter((notif) => notif.id !== id));
     }, 5000);
   };
-
-  // Request waiting room data when becoming host
-  useEffect(() => {
-    if (isHost && socketRef.current && connectionEstablished.current) {
-      console.log("👑 Host status confirmed, requesting waiting room data");
-      socketRef.current.emit("get-waiting-room", { roomId });
-    }
-  }, [isHost, roomId]);
 
   // Render different states
   if (roomState === "waiting") {
@@ -845,10 +868,84 @@ const Room = () => {
         <div className="connecting-message">
           <h2>{connectionStatus}</h2>
           <div className="spinner"></div>
-          <p style={{ marginTop: "20px", color: "#888", fontSize: "14px" }}>
-            If this takes too long, try refreshing the page or check your
-            internet connection.
-          </p>
+          <div style={{ marginTop: "20px", color: "#888", fontSize: "14px" }}>
+            <p>Current step: {currentStep}</p>
+            <p>{detailedStatus}</p>
+          </div>
+
+          {/* Debug Panel */}
+          <div
+            style={{
+              marginTop: "30px",
+              textAlign: "left",
+              backgroundColor: "#2a2a2a",
+              padding: "15px",
+              borderRadius: "8px",
+              maxHeight: "200px",
+              overflowY: "auto",
+              fontSize: "12px",
+            }}
+          >
+            <h4 style={{ margin: "0 0 10px 0", color: "#2d8cff" }}>
+              Debug Log:
+            </h4>
+            {debugSteps.map((step, index) => (
+              <div
+                key={index}
+                style={{
+                  margin: "5px 0",
+                  color:
+                    step.status === "error"
+                      ? "#ff6b6b"
+                      : step.status === "success"
+                      ? "#4caf50"
+                      : step.status === "warning"
+                      ? "#ff9800"
+                      : "#ccc",
+                }}
+              >
+                <strong>[{step.timestamp}]</strong> {step.step}: {step.status}
+                {step.details && (
+                  <div style={{ marginLeft: "10px", fontSize: "11px" }}>
+                    {step.details}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div style={{ marginTop: "20px" }}>
+            <button
+              onClick={() => {
+                initializationRef.current = false;
+                window.location.reload();
+              }}
+              style={{
+                backgroundColor: "#2d8cff",
+                color: "white",
+                border: "none",
+                padding: "10px 20px",
+                borderRadius: "5px",
+                cursor: "pointer",
+                marginRight: "10px",
+              }}
+            >
+              Retry Connection
+            </button>
+            <button
+              onClick={() => navigate("/")}
+              style={{
+                backgroundColor: "#ff5d5d",
+                color: "white",
+                border: "none",
+                padding: "10px 20px",
+                borderRadius: "5px",
+                cursor: "pointer",
+              }}
+            >
+              Go Back
+            </button>
+          </div>
         </div>
       </div>
     );
