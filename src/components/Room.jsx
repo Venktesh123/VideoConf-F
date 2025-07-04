@@ -133,11 +133,16 @@ const Room = () => {
       setConnectionStatus("Disconnected from server");
     });
 
-    // Handle admission status
+    // Handle admission status - FIXED
     socketRef.current.on(
       "admission-status",
       ({ status, isHost: hostStatus, chatMessages: messages, message }) => {
-        console.log("Admission status received:", status);
+        console.log(
+          "Admission status received:",
+          status,
+          "isHost:",
+          hostStatus
+        );
 
         if (status === "approved") {
           setRoomState("approved");
@@ -145,12 +150,18 @@ const Room = () => {
           setConnectionStatus("Connected");
           connectionEstablished.current = true;
 
+          // Set chat messages if available
           if (messages && Array.isArray(messages)) {
             setChatMessages(messages);
           }
 
+          // Show appropriate notifications
           if (hostStatus) {
             addNotification("You are the host of this meeting", "success");
+            // Auto-show host controls for new hosts
+            setTimeout(() => {
+              setShowHostControls(true);
+            }, 1000);
           } else {
             addNotification("Welcome to the meeting!", "success");
           }
@@ -165,15 +176,18 @@ const Room = () => {
       }
     );
 
-    // Handle waiting room updates
+    // Handle waiting room updates - FIXED
     socketRef.current.on(
       "waiting-room-update",
       ({ waitingParticipants: waiting }) => {
-        console.log("Waiting room update:", waiting);
+        console.log("Waiting room update received:", waiting);
         setWaitingParticipants(waiting || []);
 
-        if (isHost && waiting && waiting.length > 0 && !showHostControls) {
-          setShowHostControls(true);
+        // Show host controls if there are waiting participants and user is host
+        if (isHost && waiting && waiting.length > 0) {
+          if (!showHostControls) {
+            setShowHostControls(true);
+          }
           addNotification(
             `${waiting.length} participant(s) waiting for approval`,
             "warning"
@@ -182,10 +196,14 @@ const Room = () => {
       }
     );
 
+    // Handle new participant waiting - FIXED
     socketRef.current.on(
       "participant-waiting",
-      ({ username: waitingUsername }) => {
+      ({ username: waitingUsername, participantId, peerId: waitingPeerId }) => {
+        console.log("New participant waiting:", waitingUsername);
         addNotification(`${waitingUsername} is waiting to join`, "info");
+
+        // Force show host controls for the host
         if (isHost) {
           setShowHostControls(true);
         }
@@ -304,14 +322,17 @@ const Room = () => {
       }
     );
 
-    // Handle host events
+    // Handle host events - FIXED
     socketRef.current.on(
       "host-transferred",
       ({ isHost: newHostStatus, message }) => {
+        console.log("Host transferred:", newHostStatus);
         setIsHost(newHostStatus);
         addNotification(message, "success");
         if (newHostStatus) {
           setShowHostControls(true);
+        } else {
+          setShowHostControls(false);
         }
       }
     );
@@ -348,7 +369,7 @@ const Room = () => {
       setTypingUsers([]);
     });
 
-    // Handle approval events
+    // Handle approval events - FIXED
     socketRef.current.on(
       "participant-approved",
       ({ username: approvedUsername, message }) => {
@@ -373,6 +394,12 @@ const Room = () => {
     socketRef.current.on("room-error", ({ message }) => {
       addNotification(`Error: ${message}`, "error");
       setTimeout(() => navigate("/"), 3000);
+    });
+
+    // Add error handler for socket
+    socketRef.current.on("error", (error) => {
+      console.error("Socket error:", error);
+      addNotification("Connection error occurred", "error");
     });
   };
 
@@ -627,19 +654,33 @@ const Room = () => {
     navigate("/");
   };
 
+  // FIXED: Host control functions with better error handling
   const approveParticipant = (participantId) => {
-    if (socketRef.current) {
+    console.log("Approving participant:", participantId);
+    if (socketRef.current && isHost) {
       socketRef.current.emit("approve-participant", { roomId, participantId });
+      addNotification("Participant approved", "success");
+    } else {
+      addNotification("Only the host can approve participants", "error");
     }
   };
 
   const denyParticipant = (participantId) => {
-    if (socketRef.current) {
+    console.log("Denying participant:", participantId);
+    if (socketRef.current && isHost) {
       socketRef.current.emit("deny-participant", { roomId, participantId });
+      addNotification("Participant denied", "info");
+    } else {
+      addNotification("Only the host can deny participants", "error");
     }
   };
 
   const removeParticipantHandler = (participantId) => {
+    if (!isHost) {
+      addNotification("Only the host can remove participants", "error");
+      return;
+    }
+
     if (window.confirm("Are you sure you want to remove this participant?")) {
       const participant = Object.values(participants).find(
         (p) => p.id === participantId
@@ -650,6 +691,7 @@ const Room = () => {
           participantId,
           peerId: participant?.peerId,
         });
+        addNotification("Participant removed", "info");
       }
     }
   };
@@ -669,6 +711,15 @@ const Room = () => {
     if (!showChat) {
       setHasUnreadMessages(false);
     }
+  };
+
+  // FIXED: Toggle host controls with proper state management
+  const toggleHostControls = () => {
+    if (!isHost) {
+      addNotification("Only the host can access host controls", "error");
+      return;
+    }
+    setShowHostControls(!showHostControls);
   };
 
   const copyRoomId = () => {
@@ -696,6 +747,14 @@ const Room = () => {
       setNotifications((prev) => prev.filter((notif) => notif.id !== id));
     }, 5000);
   };
+
+  // FIXED: Request waiting room data on host status change
+  useEffect(() => {
+    if (isHost && socketRef.current && connectionEstablished.current) {
+      console.log("Host status confirmed, requesting waiting room data");
+      socketRef.current.emit("get-waiting-room", { roomId });
+    }
+  }, [isHost, roomId]);
 
   if (roomState === "waiting") {
     return (
@@ -800,9 +859,7 @@ const Room = () => {
         toggleParticipants={() => setShowParticipants(!showParticipants)}
         participantsCount={Object.keys(participants).length + 1}
         onToggleChat={toggleChat}
-        onToggleHostControls={
-          isHost ? () => setShowHostControls(!showHostControls) : null
-        }
+        onToggleHostControls={isHost ? toggleHostControls : null}
         isHost={isHost}
         waitingCount={waitingParticipants.length}
         showChat={showChat}

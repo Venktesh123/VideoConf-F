@@ -28,6 +28,13 @@ const Controls = ({
   showHostControls,
   hasUnreadMessages = false,
 }) => {
+  console.log(
+    "Controls rendered - isHost:",
+    isHost,
+    "waitingCount:",
+    waitingCount
+  );
+
   return (
     <div className="controls">
       <button
@@ -35,6 +42,7 @@ const Controls = ({
           !audioEnabled ? "control-button-off" : ""
         }`}
         onClick={toggleAudio}
+        title={audioEnabled ? "Mute microphone" : "Unmute microphone"}
       >
         {audioEnabled ? (
           <>
@@ -54,6 +62,7 @@ const Controls = ({
           !videoEnabled ? "control-button-off" : ""
         }`}
         onClick={toggleVideo}
+        title={videoEnabled ? "Stop video" : "Start video"}
       >
         {videoEnabled ? (
           <>
@@ -68,7 +77,11 @@ const Controls = ({
         )}
       </button>
 
-      <button className="control-button" onClick={toggleParticipants}>
+      <button
+        className="control-button"
+        onClick={toggleParticipants}
+        title="Show participants list"
+      >
         <FaUserFriends />
         <span>Participants ({participantsCount})</span>
       </button>
@@ -78,18 +91,24 @@ const Controls = ({
           hasUnreadMessages ? "has-notification" : ""
         }`}
         onClick={onToggleChat}
+        title="Toggle chat"
       >
         <FaComments />
         <span>Chat</span>
         {hasUnreadMessages && <div className="notification-dot"></div>}
       </button>
 
-      {isHost && (
+      {/* FIXED: Only show host controls if user is actually a host */}
+      {isHost && onToggleHostControls && (
         <button
           className={`control-button control-button-host ${
             showHostControls ? "control-button-active" : ""
           } ${waitingCount > 0 ? "has-notification" : ""}`}
-          onClick={onToggleHostControls}
+          onClick={() => {
+            console.log("Host controls button clicked");
+            onToggleHostControls();
+          }}
+          title="Host controls and waiting room"
         >
           <FaCrown />
           <span>Host Controls</span>
@@ -102,6 +121,7 @@ const Controls = ({
       <button
         className="control-button control-button-danger"
         onClick={leaveRoom}
+        title="Leave meeting"
       >
         <FaPhoneSlash />
         <span>Leave</span>

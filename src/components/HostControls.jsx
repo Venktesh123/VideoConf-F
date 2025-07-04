@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import {
   FaUserClock,
   FaTimes,
@@ -20,25 +20,62 @@ const HostControls = ({
   onRemoveParticipant,
 }) => {
   const formatTime = (timestamp) => {
-    return new Date(timestamp).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    try {
+      return new Date(timestamp).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch (error) {
+      return "Unknown time";
+    }
   };
 
   const getWaitingTime = (requestedAt) => {
-    const now = new Date();
-    const requested = new Date(requestedAt);
-    const diffMinutes = Math.floor((now - requested) / 60000);
+    try {
+      const now = new Date();
+      const requested = new Date(requestedAt);
+      const diffMinutes = Math.floor((now - requested) / 60000);
 
-    if (diffMinutes < 1) return "Just now";
-    if (diffMinutes === 1) return "1 minute ago";
-    return `${diffMinutes} minutes ago`;
+      if (diffMinutes < 1) return "Just now";
+      if (diffMinutes === 1) return "1 minute ago";
+      return `${diffMinutes} minutes ago`;
+    } catch (error) {
+      return "Unknown";
+    }
   };
+
+  // Debug logging
+  useEffect(() => {
+    console.log("HostControls component updated:");
+    console.log("- isOpen:", isOpen);
+    console.log("- waitingParticipants:", waitingParticipants);
+    console.log("- currentParticipants:", currentParticipants);
+  }, [isOpen, waitingParticipants, currentParticipants]);
 
   if (!isOpen) return null;
 
   const hasWaitingParticipants = waitingParticipants.length > 0;
+
+  const handleApprove = (participantId) => {
+    console.log("Approving participant:", participantId);
+    if (onApprove) {
+      onApprove(participantId);
+    }
+  };
+
+  const handleDeny = (participantId) => {
+    console.log("Denying participant:", participantId);
+    if (onDeny) {
+      onDeny(participantId);
+    }
+  };
+
+  const handleRemove = (participantId) => {
+    console.log("Removing participant:", participantId);
+    if (onRemoveParticipant) {
+      onRemoveParticipant(participantId);
+    }
+  };
 
   return (
     <div
@@ -57,7 +94,11 @@ const HostControls = ({
             </span>
           )}
         </div>
-        <button className="host-controls-close-button" onClick={onClose}>
+        <button
+          className="host-controls-close-button"
+          onClick={onClose}
+          title="Close host controls"
+        >
           <FaTimes />
         </button>
       </div>
@@ -87,43 +128,50 @@ const HostControls = ({
             </div>
           ) : (
             <div className="waiting-list">
-              {waitingParticipants.map((participant) => (
-                <div
-                  key={participant.id}
-                  className="waiting-participant urgent"
-                >
-                  <div className="participant-info">
-                    <div className="participant-name">
-                      {participant.username}
-                      <span className="new-badge">NEW</span>
+              {waitingParticipants.map((participant) => {
+                if (!participant || !participant.id) {
+                  console.warn("Invalid participant data:", participant);
+                  return null;
+                }
+
+                return (
+                  <div
+                    key={participant.id}
+                    className="waiting-participant urgent"
+                  >
+                    <div className="participant-info">
+                      <div className="participant-name">
+                        {participant.username || "Unknown User"}
+                        <span className="new-badge">NEW</span>
+                      </div>
+                      <div className="participant-details">
+                        <span className="join-time">
+                          Requested: {formatTime(participant.requestedAt)}
+                        </span>
+                        <span className="waiting-duration">
+                          ({getWaitingTime(participant.requestedAt)})
+                        </span>
+                      </div>
                     </div>
-                    <div className="participant-details">
-                      <span className="join-time">
-                        Requested: {formatTime(participant.requestedAt)}
-                      </span>
-                      <span className="waiting-duration">
-                        ({getWaitingTime(participant.requestedAt)})
-                      </span>
+                    <div className="participant-actions">
+                      <button
+                        className="approve-button"
+                        onClick={() => handleApprove(participant.id)}
+                        title="Approve participant"
+                      >
+                        <FaCheck />
+                      </button>
+                      <button
+                        className="deny-button"
+                        onClick={() => handleDeny(participant.id)}
+                        title="Deny participant"
+                      >
+                        <FaTimes />
+                      </button>
                     </div>
                   </div>
-                  <div className="participant-actions">
-                    <button
-                      className="approve-button"
-                      onClick={() => onApprove(participant.id)}
-                      title="Approve participant"
-                    >
-                      <FaCheck />
-                    </button>
-                    <button
-                      className="deny-button"
-                      onClick={() => onDeny(participant.id)}
-                      title="Deny participant"
-                    >
-                      <FaTimes />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -142,51 +190,65 @@ const HostControls = ({
             </div>
           ) : (
             <div className="participants-list">
-              {currentParticipants.map((participant) => (
-                <div key={participant.id} className="current-participant">
-                  <div className="participant-info">
-                    <div className="participant-name">
-                      {participant.username}
-                      {participant.isHost && <FaCrown className="host-badge" />}
+              {currentParticipants.map((participant) => {
+                if (!participant || !participant.id) {
+                  console.warn(
+                    "Invalid current participant data:",
+                    participant
+                  );
+                  return null;
+                }
+
+                return (
+                  <div key={participant.id} className="current-participant">
+                    <div className="participant-info">
+                      <div className="participant-name">
+                        {participant.username || "Unknown User"}
+                        {participant.isHost && (
+                          <FaCrown className="host-badge" />
+                        )}
+                      </div>
+                      <div className="participant-status">
+                        <span
+                          className={`status-indicator ${
+                            participant.audioEnabled ? "enabled" : "disabled"
+                          }`}
+                          title={
+                            participant.audioEnabled
+                              ? "Microphone on"
+                              : "Microphone off"
+                          }
+                        >
+                          🎤
+                        </span>
+                        <span
+                          className={`status-indicator ${
+                            participant.videoEnabled ? "enabled" : "disabled"
+                          }`}
+                          title={
+                            participant.videoEnabled
+                              ? "Camera on"
+                              : "Camera off"
+                          }
+                        >
+                          📹
+                        </span>
+                      </div>
                     </div>
-                    <div className="participant-status">
-                      <span
-                        className={`status-indicator ${
-                          participant.audioEnabled ? "enabled" : "disabled"
-                        }`}
-                        title={
-                          participant.audioEnabled
-                            ? "Microphone on"
-                            : "Microphone off"
-                        }
-                      >
-                        🎤
-                      </span>
-                      <span
-                        className={`status-indicator ${
-                          participant.videoEnabled ? "enabled" : "disabled"
-                        }`}
-                        title={
-                          participant.videoEnabled ? "Camera on" : "Camera off"
-                        }
-                      >
-                        📹
-                      </span>
-                    </div>
+                    {!participant.isHost && participant.id !== "self" && (
+                      <div className="participant-actions">
+                        <button
+                          className="remove-button"
+                          onClick={() => handleRemove(participant.id)}
+                          title="Remove participant"
+                        >
+                          <FaUserMinus />
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  {!participant.isHost && participant.id !== "self" && (
-                    <div className="participant-actions">
-                      <button
-                        className="remove-button"
-                        onClick={() => onRemoveParticipant(participant.id)}
-                        title="Remove participant"
-                      >
-                        <FaUserMinus />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
