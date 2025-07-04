@@ -47,23 +47,42 @@ const Room = () => {
   const peersRef = useRef({});
   const streamRef = useRef();
   const connectionEstablished = useRef(false);
+  const initializationRef = useRef(false); // Prevent multiple initializations
 
   useEffect(() => {
     if (!username) {
+      addNotification("Username is required", "error");
       navigate("/");
       return;
     }
 
+    if (!roomId) {
+      addNotification("Room ID is required", "error");
+      navigate("/");
+      return;
+    }
+
+    // Prevent multiple initializations
+    if (initializationRef.current) {
+      console.log("Already initializing, skipping...");
+      return;
+    }
+
+    initializationRef.current = true;
+    console.log("🚀 Starting room initialization...");
+
     initializeConnection();
 
     return () => {
+      console.log("🧹 Cleaning up room...");
       cleanup();
     };
-  }, [username, navigate, roomId]);
+  }, []); // Remove dependencies to prevent re-initialization
 
   const initializeConnection = async () => {
     try {
-      setConnectionStatus("Getting media...");
+      console.log("📱 Requesting media access...");
+      setConnectionStatus("Getting camera and microphone...");
 
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -78,6 +97,7 @@ const Room = () => {
         },
       });
 
+      console.log("✅ Media access granted");
       setStream(mediaStream);
       streamRef.current = mediaStream;
 
@@ -87,16 +107,19 @@ const Room = () => {
       }
 
       setConnectionStatus("Connecting to server...");
+      console.log("🔌 Initializing socket connection...");
 
-      // Initialize Socket connection
+      // Initialize Socket connection with timeout
       socketRef.current = io(API_URL, {
         transports: ["websocket", "polling"],
         reconnection: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
+        timeout: 10000, // 10 second timeout
       });
 
       // Initialize Peer connection
+      console.log("🔗 Initializing peer connection...");
       peerRef.current = new Peer(undefined, {
         config: {
           iceServers: [
@@ -111,40 +134,74 @@ const Room = () => {
 
       setupSocketEvents();
       setupPeerEvents();
+
+      // Add connection timeout
+      setTimeout(() => {
+        if (roomState === "connecting") {
+          console.error("❌ Connection timeout");
+          addNotification("Connection timeout. Please try again.", "error");
+          setConnectionStatus("Connection failed");
+          setTimeout(() => navigate("/"), 3000);
+        }
+      }, 30000); // 30 second timeout
     } catch (error) {
-      console.error("Error initializing connection:", error);
+      console.error("❌ Error initializing connection:", error);
       setConnectionStatus("Failed to connect");
-      addNotification(
-        "Failed to access camera/microphone. Please check permissions.",
-        "error"
-      );
-      setTimeout(() => navigate("/"), 3000);
+
+      if (error.name === "NotAllowedError") {
+        addNotification(
+          "Camera/microphone access denied. Please allow access and refresh the page.",
+          "error"
+        );
+      } else if (error.name === "NotFoundError") {
+        addNotification(
+          "No camera or microphone found. Please check your devices.",
+          "error"
+        );
+      } else {
+        addNotification(
+          `Failed to access camera/microphone: ${error.message}`,
+          "error"
+        );
+      }
+
+      setTimeout(() => navigate("/"), 5000);
     }
   };
 
   const setupSocketEvents = () => {
+    if (!socketRef.current) return;
+
     socketRef.current.on("connect", () => {
-      console.log("Socket connected:", socketRef.current.id);
+      console.log("✅ Socket connected:", socketRef.current.id);
       setConnectionStatus("Connected to server");
     });
 
-    socketRef.current.on("disconnect", () => {
-      console.log("Socket disconnected");
+    socketRef.current.on("disconnect", (reason) => {
+      console.log("❌ Socket disconnected:", reason);
       setConnectionStatus("Disconnected from server");
+      addNotification("Disconnected from server", "error");
     });
 
-    // Handle admission status - FIXED
+    socketRef.current.on("connect_error", (error) => {
+      console.error("❌ Socket connection error:", error);
+      setConnectionStatus("Connection failed");
+      addNotification("Failed to connect to server", "error");
+    });
+
+    // Handle admission status - ENHANCED ERROR HANDLING
     socketRef.current.on(
       "admission-status",
       ({ status, isHost: hostStatus, chatMessages: messages, message }) => {
         console.log(
-          "Admission status received:",
+          "📨 Admission status received:",
           status,
           "isHost:",
           hostStatus
         );
 
         if (status === "approved") {
+          console.log("✅ Access approved, joining room...");
           setRoomState("approved");
           setIsHost(hostStatus || false);
           setConnectionStatus("Connected");
@@ -158,7 +215,6 @@ const Room = () => {
           // Show appropriate notifications
           if (hostStatus) {
             addNotification("You are the host of this meeting", "success");
-            // Auto-show host controls for new hosts
             setTimeout(() => {
               setShowHostControls(true);
             }, 1000);
@@ -166,9 +222,11 @@ const Room = () => {
             addNotification("Welcome to the meeting!", "success");
           }
         } else if (status === "waiting") {
+          console.log("⏳ Waiting for host approval...");
           setRoomState("waiting");
           setConnectionStatus("Waiting for host approval");
         } else if (status === "denied") {
+          console.log("❌ Access denied by host");
           setRoomState("denied");
           addNotification(message || "Access denied by host", "error");
           setTimeout(() => navigate("/"), 3000);
@@ -176,14 +234,21 @@ const Room = () => {
       }
     );
 
-    // Handle waiting room updates - FIXED
+    // Enhanced error handling
+    socketRef.current.on("room-error", ({ message }) => {
+      console.error("❌ Room error:", message);
+      addNotification(`Room error: ${message}`, "error");
+      setConnectionStatus("Room error");
+      setTimeout(() => navigate("/"), 3000);
+    });
+
+    // Handle waiting room updates
     socketRef.current.on(
       "waiting-room-update",
       ({ waitingParticipants: waiting }) => {
-        console.log("Waiting room update received:", waiting);
+        console.log("📋 Waiting room update received:", waiting);
         setWaitingParticipants(waiting || []);
 
-        // Show host controls if there are waiting participants and user is host
         if (isHost && waiting && waiting.length > 0) {
           if (!showHostControls) {
             setShowHostControls(true);
@@ -196,14 +261,13 @@ const Room = () => {
       }
     );
 
-    // Handle new participant waiting - FIXED
+    // Handle new participant waiting
     socketRef.current.on(
       "participant-waiting",
       ({ username: waitingUsername, participantId, peerId: waitingPeerId }) => {
-        console.log("New participant waiting:", waitingUsername);
+        console.log("👤 New participant waiting:", waitingUsername);
         addNotification(`${waitingUsername} is waiting to join`, "info");
 
-        // Force show host controls for the host
         if (isHost) {
           setShowHostControls(true);
         }
@@ -214,7 +278,7 @@ const Room = () => {
     socketRef.current.on(
       "user-joined",
       ({ participantId, username: newUsername, peerId: newPeerId }) => {
-        console.log(`User joined: ${newUsername} (${newPeerId})`);
+        console.log(`👤 User joined: ${newUsername} (${newPeerId})`);
         addNotification(`${newUsername} joined the meeting`, "success");
 
         if (
@@ -233,7 +297,7 @@ const Room = () => {
     socketRef.current.on(
       "room-participants",
       ({ participants: existingParticipants }) => {
-        console.log("Existing participants:", existingParticipants);
+        console.log("👥 Existing participants:", existingParticipants);
 
         if (existingParticipants && connectionEstablished.current) {
           Object.values(existingParticipants).forEach((participant) => {
@@ -250,7 +314,7 @@ const Room = () => {
     socketRef.current.on(
       "user-left",
       ({ peerId: leftPeerId, participantId, username: leftUsername }) => {
-        console.log(`User left: ${leftPeerId}`);
+        console.log(`👋 User left: ${leftPeerId}`);
         addNotification(`${leftUsername} left the meeting`, "info");
 
         if (leftPeerId && peersRef.current[leftPeerId]) {
@@ -322,11 +386,11 @@ const Room = () => {
       }
     );
 
-    // Handle host events - FIXED
+    // Handle host events
     socketRef.current.on(
       "host-transferred",
       ({ isHost: newHostStatus, message }) => {
-        console.log("Host transferred:", newHostStatus);
+        console.log("👑 Host transferred:", newHostStatus);
         setIsHost(newHostStatus);
         addNotification(message, "success");
         if (newHostStatus) {
@@ -369,7 +433,7 @@ const Room = () => {
       setTypingUsers([]);
     });
 
-    // Handle approval events - FIXED
+    // Handle approval events
     socketRef.current.on(
       "participant-approved",
       ({ username: approvedUsername, message }) => {
@@ -390,50 +454,47 @@ const Room = () => {
         addNotification(message, "info");
       }
     );
-
-    socketRef.current.on("room-error", ({ message }) => {
-      addNotification(`Error: ${message}`, "error");
-      setTimeout(() => navigate("/"), 3000);
-    });
-
-    // Add error handler for socket
-    socketRef.current.on("error", (error) => {
-      console.error("Socket error:", error);
-      addNotification("Connection error occurred", "error");
-    });
   };
 
   const setupPeerEvents = () => {
+    if (!peerRef.current) return;
+
     peerRef.current.on("open", (id) => {
-      console.log("Peer connected with ID:", id);
+      console.log("🔗 Peer connected with ID:", id);
       setPeerId(id);
       setConnectionStatus("Joining room...");
 
       // Join room with socket
-      socketRef.current.emit("join-room", {
-        roomId,
-        username,
-        peerId: id,
-      });
+      if (socketRef.current && socketRef.current.connected) {
+        console.log("📤 Emitting join-room event...");
+        socketRef.current.emit("join-room", {
+          roomId,
+          username,
+          peerId: id,
+        });
+      } else {
+        console.error("❌ Socket not connected when trying to join room");
+        addNotification("Connection error. Please refresh the page.", "error");
+      }
     });
 
     peerRef.current.on("call", (call) => {
-      console.log("Receiving call from:", call.peer);
+      console.log("📞 Receiving call from:", call.peer);
 
       call.answer(streamRef.current);
 
       call.on("stream", (remoteStream) => {
-        console.log("Received remote stream from:", call.peer);
+        console.log("📡 Received remote stream from:", call.peer);
         addParticipant(call.peer, remoteStream, call);
       });
 
       call.on("close", () => {
-        console.log("Call closed from:", call.peer);
+        console.log("📞 Call closed from:", call.peer);
         removeParticipant(call.peer);
       });
 
       call.on("error", (error) => {
-        console.error("Call error:", error);
+        console.error("❌ Call error:", error);
         removeParticipant(call.peer);
       });
 
@@ -441,12 +502,13 @@ const Room = () => {
     });
 
     peerRef.current.on("error", (error) => {
-      console.error("Peer error:", error);
-      setConnectionStatus("Connection error");
+      console.error("❌ Peer error:", error);
+      setConnectionStatus("Peer connection error");
+      addNotification("Peer connection failed", "error");
     });
 
     peerRef.current.on("disconnected", () => {
-      console.log("Peer disconnected, attempting to reconnect...");
+      console.log("🔗 Peer disconnected, attempting to reconnect...");
       if (!peerRef.current.destroyed) {
         peerRef.current.reconnect();
       }
@@ -454,36 +516,36 @@ const Room = () => {
   };
 
   const makeCall = (remotePeerId, remoteUsername) => {
-    console.log("Making call to:", remotePeerId);
+    console.log("📞 Making call to:", remotePeerId);
 
     if (
       !peerRef.current ||
       !peerRef.current.open ||
       peersRef.current[remotePeerId]
     ) {
-      console.log("Cannot make call - peer not ready or already connected");
+      console.log("⚠️ Cannot make call - peer not ready or already connected");
       return;
     }
 
     const call = peerRef.current.call(remotePeerId, streamRef.current);
 
     if (!call) {
-      console.error("Failed to create call to:", remotePeerId);
+      console.error("❌ Failed to create call to:", remotePeerId);
       return;
     }
 
     call.on("stream", (remoteStream) => {
-      console.log("Received stream from called peer:", remotePeerId);
+      console.log("📡 Received stream from called peer:", remotePeerId);
       addParticipant(remotePeerId, remoteStream, call, remoteUsername);
     });
 
     call.on("close", () => {
-      console.log("Call closed to:", remotePeerId);
+      console.log("📞 Call closed to:", remotePeerId);
       removeParticipant(remotePeerId);
     });
 
     call.on("error", (error) => {
-      console.error("Call error to", remotePeerId, ":", error);
+      console.error("❌ Call error to", remotePeerId, ":", error);
       removeParticipant(remotePeerId);
     });
 
@@ -518,8 +580,9 @@ const Room = () => {
   };
 
   const cleanup = () => {
-    console.log("Cleaning up connections...");
+    console.log("🧹 Cleaning up connections...");
     connectionEstablished.current = false;
+    initializationRef.current = false;
 
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => {
@@ -562,7 +625,7 @@ const Room = () => {
   };
 
   const toggleVideo = async () => {
-    console.log("Toggling video. Current state:", videoEnabled);
+    console.log("🎥 Toggling video. Current state:", videoEnabled);
 
     if (!videoEnabled) {
       // Starting video
@@ -613,7 +676,7 @@ const Room = () => {
 
         setVideoEnabled(true);
       } catch (error) {
-        console.error("Error getting video stream:", error);
+        console.error("❌ Error getting video stream:", error);
         addNotification(
           "Failed to access camera. Please check permissions.",
           "error"
@@ -654,9 +717,9 @@ const Room = () => {
     navigate("/");
   };
 
-  // FIXED: Host control functions with better error handling
+  // Host control functions
   const approveParticipant = (participantId) => {
-    console.log("Approving participant:", participantId);
+    console.log("✅ Approving participant:", participantId);
     if (socketRef.current && isHost) {
       socketRef.current.emit("approve-participant", { roomId, participantId });
       addNotification("Participant approved", "success");
@@ -666,7 +729,7 @@ const Room = () => {
   };
 
   const denyParticipant = (participantId) => {
-    console.log("Denying participant:", participantId);
+    console.log("❌ Denying participant:", participantId);
     if (socketRef.current && isHost) {
       socketRef.current.emit("deny-participant", { roomId, participantId });
       addNotification("Participant denied", "info");
@@ -713,7 +776,6 @@ const Room = () => {
     }
   };
 
-  // FIXED: Toggle host controls with proper state management
   const toggleHostControls = () => {
     if (!isHost) {
       addNotification("Only the host can access host controls", "error");
@@ -748,14 +810,15 @@ const Room = () => {
     }, 5000);
   };
 
-  // FIXED: Request waiting room data on host status change
+  // Request waiting room data when becoming host
   useEffect(() => {
     if (isHost && socketRef.current && connectionEstablished.current) {
-      console.log("Host status confirmed, requesting waiting room data");
+      console.log("👑 Host status confirmed, requesting waiting room data");
       socketRef.current.emit("get-waiting-room", { roomId });
     }
   }, [isHost, roomId]);
 
+  // Render different states
   if (roomState === "waiting") {
     return (
       <WaitingRoom roomId={roomId} username={username} onLeave={leaveRoom} />
@@ -782,6 +845,10 @@ const Room = () => {
         <div className="connecting-message">
           <h2>{connectionStatus}</h2>
           <div className="spinner"></div>
+          <p style={{ marginTop: "20px", color: "#888", fontSize: "14px" }}>
+            If this takes too long, try refreshing the page or check your
+            internet connection.
+          </p>
         </div>
       </div>
     );
