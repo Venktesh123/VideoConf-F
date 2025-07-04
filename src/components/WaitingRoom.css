@@ -3,123 +3,327 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  background: linear-gradient(135deg, #1e1e1e 0%, #2a2a2a 100%);
+  background: linear-gradient(135deg, #1e1e1e 0%, #2a2a2a 50%, #1e1e1e 100%);
   padding: 20px;
+  overflow-y: auto;
 }
 
 .waiting-room-container {
-  max-width: 600px;
+  max-width: 650px;
   width: 100%;
   background-color: #1e1e1e;
-  border-radius: 15px;
-  padding: 0;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  border: 1px solid #333;
+  border-radius: 20px;
   overflow: hidden;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.4);
+  border: 1px solid #333;
+  animation: slideUp 0.6s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(50px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .waiting-room-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 30px;
-  background-color: #2d8cff;
+  padding: 25px 30px;
+  background: linear-gradient(135deg, #2d8cff 0%, #1a7bef 100%);
   color: white;
+  position: relative;
+}
+
+.header-content {
+  flex: 1;
 }
 
 .waiting-room-header h1 {
-  margin: 0;
-  font-size: 20px;
+  margin: 0 0 8px 0;
+  font-size: 22px;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-icon {
+  font-size: 20px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.connection-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+.wifi-icon {
+  font-size: 16px;
+}
+
+.wifi-icon.connected {
+  color: #4caf50;
 }
 
 .leave-button {
-  background: none;
+  background: rgba(255, 255, 255, 0.2);
   border: none;
   color: white;
   cursor: pointer;
-  font-size: 20px;
-  opacity: 0.8;
-  transition: opacity 0.2s ease;
-  padding: 5px;
+  font-size: 18px;
+  padding: 10px;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
 }
 
 .leave-button:hover {
-  opacity: 1;
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.1);
 }
 
 .waiting-room-content {
-  padding: 40px 30px;
-  text-align: center;
+  padding: 30px;
 }
 
-.waiting-icon {
-  font-size: 48px;
-  color: #2d8cff;
-  margin-bottom: 20px;
+.waiting-info {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.user-avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2d8cff 0%, #1a7bef 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: bold;
+  color: white;
+  margin: 0 auto 20px;
+  box-shadow: 0 8px 25px rgba(45, 140, 255, 0.3);
+  animation: avatarFloat 3s ease-in-out infinite;
+}
+
+@keyframes avatarFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
 }
 
 .waiting-info h2 {
   margin: 0 0 15px 0;
   color: #2d8cff;
-  font-size: 24px;
+  font-size: 26px;
+  font-weight: 600;
 }
 
-.waiting-info p {
-  margin: 10px 0;
+.room-info {
+  margin: 15px 0;
   color: #ccc;
+  font-size: 16px;
   line-height: 1.5;
 }
 
-.waiting-info strong {
+.room-info strong {
   color: white;
   font-family: "Courier New", monospace;
   background-color: #333;
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-weight: bold;
+}
+
+.waiting-message {
+  color: #aaa;
+  font-size: 16px;
+  line-height: 1.6;
+  margin: 15px 0;
 }
 
 .waiting-animation {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 15px;
-  margin: 30px 0;
-  padding: 20px;
+  gap: 20px;
+  margin: 35px 0;
+  padding: 25px;
   background-color: #2a2a2a;
-  border-radius: 10px;
+  border-radius: 15px;
   border: 1px solid #333;
 }
 
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 4px solid #333;
-  border-top: 4px solid #2d8cff;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
+.waiting-timer {
+  text-align: center;
 }
 
-@keyframes spin {
+.timer-text {
+  display: block;
+  color: #888;
+  font-size: 14px;
+  margin-bottom: 5px;
+}
+
+.timer-value {
+  display: block;
+  color: #2d8cff;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 6px;
+  background-color: #333;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2d8cff, #1a7bef, #2d8cff);
+  background-size: 200% 100%;
+  animation: progressMove 2s ease-in-out infinite;
+  width: 100%;
+}
+
+@keyframes progressMove {
   0% {
-    transform: rotate(0deg);
+    background-position: -200% 0;
   }
   100% {
-    transform: rotate(360deg);
+    background-position: 200% 0;
   }
 }
 
-.waiting-animation span {
-  color: #ccc;
+.status-text {
+  color: #aaa;
+  font-size: 14px;
   font-style: italic;
 }
 
-.waiting-tips {
-  margin-top: 30px;
-  text-align: left;
-  background-color: #2a2a2a;
+.media-check {
+  margin-bottom: 30px;
   padding: 20px;
-  border-radius: 10px;
+  background-color: #262626;
+  border-radius: 12px;
+  border: 1px solid #333;
+}
+
+.media-check h3 {
+  margin: 0 0 15px 0;
+  color: #2d8cff;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.device-status {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.device-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 15px;
+  background-color: #333;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.device-item.enabled {
+  border-left: 4px solid #4caf50;
+  background-color: rgba(76, 175, 80, 0.1);
+}
+
+.device-item.disabled {
+  border-left: 4px solid #ff9800;
+  background-color: rgba(255, 152, 0, 0.1);
+}
+
+.device-icon {
+  font-size: 16px;
+  width: 20px;
+}
+
+.device-item.enabled .device-icon {
+  color: #4caf50;
+}
+
+.device-item.disabled .device-icon {
+  color: #ff9800;
+}
+
+.device-item span:nth-child(2) {
+  flex: 1;
+  color: white;
+  font-weight: 500;
+}
+
+.status-badge {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.device-item.enabled .status-badge {
+  background-color: rgba(76, 175, 80, 0.2);
+  color: #4caf50;
+}
+
+.device-item.disabled .status-badge {
+  background-color: rgba(255, 152, 0, 0.2);
+  color: #ff9800;
+}
+
+.permission-notice {
+  margin-top: 15px;
+  padding: 12px;
+  background-color: rgba(255, 152, 0, 0.1);
+  border: 1px solid #ff9800;
+  border-radius: 8px;
+  color: #ffb347;
+  font-size: 14px;
+  text-align: center;
+}
+
+.waiting-tips {
+  margin-bottom: 30px;
+  padding: 20px;
+  background-color: #2a2a2a;
+  border-radius: 12px;
   border: 1px solid #333;
 }
 
@@ -127,79 +331,212 @@
   margin: 0 0 15px 0;
   color: #2d8cff;
   font-size: 16px;
+  font-weight: 600;
 }
 
 .waiting-tips ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.waiting-tips li {
+  margin: 10px 0;
+  color: #ccc;
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 8px 0;
+  border-bottom: 1px solid #333;
+}
+
+.waiting-tips li:last-child {
+  border-bottom: none;
+}
+
+.host-info {
+  margin-bottom: 20px;
+}
+
+.info-card {
+  padding: 20px;
+  background-color: #262626;
+  border-radius: 12px;
+  border: 1px solid #333;
+}
+
+.info-card h4 {
+  margin: 0 0 15px 0;
+  color: #2d8cff;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.info-card ol {
   margin: 0;
   padding-left: 20px;
   color: #ccc;
 }
 
-.waiting-tips li {
+.info-card li {
   margin: 8px 0;
-  line-height: 1.4;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .waiting-room-footer {
-  padding: 20px 30px;
+  padding: 25px 30px;
   background-color: #2a2a2a;
   border-top: 1px solid #333;
-  text-align: center;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+}
+
+.footer-info {
+  flex: 1;
+}
+
+.footer-info p {
+  margin: 0;
+  color: #888;
+  font-size: 13px;
 }
 
 .cancel-button {
   background-color: transparent;
   color: #ff5d5d;
   border: 2px solid #ff5d5d;
-  padding: 12px 30px;
+  padding: 12px 24px;
   border-radius: 8px;
-  font-size: 16px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 600;
   transition: all 0.2s ease;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
 }
 
 .cancel-button:hover {
   background-color: #ff5d5d;
   color: white;
+  transform: translateY(-1px);
 }
 
 /* Mobile responsive */
 @media (max-width: 768px) {
   .waiting-room {
-    padding: 10px;
+    padding: 15px;
+    align-items: flex-start;
+    padding-top: 30px;
   }
 
   .waiting-room-container {
     max-width: none;
+    border-radius: 15px;
   }
 
   .waiting-room-header {
-    padding: 15px 20px;
+    padding: 20px;
+    flex-direction: column;
+    gap: 15px;
+    align-items: flex-start;
   }
 
   .waiting-room-header h1 {
-    font-size: 18px;
+    font-size: 20px;
+  }
+
+  .leave-button {
+    align-self: flex-end;
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
   }
 
   .waiting-room-content {
-    padding: 30px 20px;
+    padding: 25px 20px;
+  }
+
+  .user-avatar {
+    width: 70px;
+    height: 70px;
+    font-size: 28px;
+  }
+
+  .waiting-info h2 {
+    font-size: 22px;
+  }
+
+  .room-info,
+  .waiting-message {
+    font-size: 15px;
+  }
+
+  .device-status {
+    gap: 10px;
+  }
+
+  .device-item {
+    padding: 10px 12px;
+  }
+
+  .waiting-tips,
+  .media-check,
+  .info-card {
+    padding: 15px;
+  }
+
+  .waiting-room-footer {
+    padding: 20px;
+    flex-direction: column;
+    gap: 15px;
+    text-align: center;
+  }
+
+  .cancel-button {
+    padding: 10px 20px;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 480px) {
+  .waiting-room {
+    padding: 10px;
+    padding-top: 20px;
+  }
+
+  .waiting-room-header {
+    padding: 15px;
+  }
+
+  .waiting-room-content {
+    padding: 20px 15px;
+  }
+
+  .user-avatar {
+    width: 60px;
+    height: 60px;
+    font-size: 24px;
   }
 
   .waiting-info h2 {
     font-size: 20px;
   }
 
-  .waiting-tips {
-    text-align: center;
+  .timer-value {
+    font-size: 18px;
   }
 
-  .waiting-tips ul {
-    text-align: left;
-    display: inline-block;
+  .device-item {
+    padding: 8px 10px;
+    gap: 10px;
   }
 
-  .waiting-room-footer {
-    padding: 15px 20px;
+  .waiting-tips li,
+  .info-card li {
+    font-size: 13px;
   }
 }
