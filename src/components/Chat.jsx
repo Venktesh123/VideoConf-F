@@ -50,7 +50,7 @@ const Chat = ({
     e.preventDefault();
 
     const trimmedMessage = message.trim();
-    if (trimmedMessage && trimmedMessage.length > 0) {
+    if (trimmedMessage && trimmedMessage.length > 0 && onSendMessage) {
       onSendMessage(trimmedMessage);
       setMessage("");
       setIsTyping(false);
@@ -64,6 +64,12 @@ const Chat = ({
 
   const handleInputChange = (e) => {
     const newMessage = e.target.value;
+
+    // Prevent message from being too long
+    if (newMessage.length > 500) {
+      return;
+    }
+
     setMessage(newMessage);
 
     // Handle typing indicators
@@ -98,11 +104,15 @@ const Chat = ({
   const formatTime = (timestamp) => {
     try {
       const date = new Date(timestamp);
+      if (isNaN(date.getTime())) {
+        return "";
+      }
       return date.toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
       });
     } catch (error) {
+      console.warn("Error formatting time:", error);
       return "";
     }
   };
@@ -113,6 +123,7 @@ const Chat = ({
     try {
       return (
         currentMsg.senderId === prevMsg.senderId &&
+        currentMsg.username === prevMsg.username &&
         new Date(currentMsg.timestamp) - new Date(prevMsg.timestamp) < 60000 // 1 minute
       );
     } catch (error) {
@@ -121,13 +132,27 @@ const Chat = ({
   };
 
   const sanitizeMessage = (msg) => {
+    if (!msg || typeof msg !== "string") return "";
+
     // Basic HTML sanitization
     return msg
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#x27;");
+      .replace(/'/g, "&#x27;")
+      .replace(/\n/g, "<br>"); // Allow line breaks
+  };
+
+  const isValidMessage = (msg) => {
+    return (
+      msg &&
+      typeof msg === "object" &&
+      msg.id &&
+      msg.username &&
+      msg.message &&
+      msg.timestamp
+    );
   };
 
   if (!isOpen) return null;
@@ -162,7 +187,10 @@ const Chat = ({
         ) : (
           <>
             {messages.map((msg, index) => {
-              if (!msg || !msg.id) return null;
+              if (!isValidMessage(msg)) {
+                console.warn("Invalid message:", msg);
+                return null;
+              }
 
               const prevMsg = index > 0 ? messages[index - 1] : null;
               const isConsecutive = isConsecutiveMessage(msg, prevMsg);
@@ -170,7 +198,7 @@ const Chat = ({
 
               return (
                 <div
-                  key={msg.id}
+                  key={`${msg.id}-${index}`} // More robust key
                   className={`message ${
                     isOwnMessage ? "own-message" : "other-message"
                   } ${isConsecutive ? "consecutive" : ""}`}
@@ -186,9 +214,12 @@ const Chat = ({
                       </span>
                     </div>
                   )}
-                  <div className="message-content">
-                    {sanitizeMessage(msg.message)}
-                  </div>
+                  <div
+                    className="message-content"
+                    dangerouslySetInnerHTML={{
+                      __html: sanitizeMessage(msg.message),
+                    }}
+                  />
                 </div>
               );
             })}

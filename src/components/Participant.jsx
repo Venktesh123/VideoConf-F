@@ -20,6 +20,7 @@ const Participant = ({
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
   const [isStreamReady, setIsStreamReady] = useState(false);
   const [hasVideoTrack, setHasVideoTrack] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState("");
 
   useEffect(() => {
     const video = videoRef || videoElement.current;
@@ -39,10 +40,12 @@ const Participant = ({
 
       video.srcObject = stream;
       setIsStreamReady(true);
+      setConnectionStatus("");
 
       // Check if stream has video tracks
       const videoTracks = stream.getVideoTracks();
-      setHasVideoTrack(videoTracks.length > 0 && videoTracks[0].enabled);
+      const hasVideo = videoTracks.length > 0 && videoTracks[0].enabled;
+      setHasVideoTrack(hasVideo);
 
       const handleLoadedMetadata = () => {
         console.log(`Video metadata loaded for ${username}`);
@@ -54,10 +57,15 @@ const Participant = ({
           playPromise
             .then(() => {
               console.log(`Video playing for ${username}`);
+              setConnectionStatus("");
             })
             .catch((error) => {
               console.log(`Video play failed for ${username}:`, error);
               setIsVideoPlaying(false);
+              // Don't show error for autoplay failures
+              if (error.name !== "NotAllowedError") {
+                setConnectionStatus("Video playback issue");
+              }
             });
         }
       };
@@ -79,14 +87,24 @@ const Participant = ({
       const handleError = (error) => {
         console.error(`Video error for ${username}:`, error);
         setIsVideoPlaying(false);
+        setConnectionStatus("Video error");
       };
 
       const handlePlay = () => {
         setIsVideoPlaying(true);
+        setConnectionStatus("");
       };
 
       const handlePause = () => {
         setIsVideoPlaying(false);
+      };
+
+      const handleWaiting = () => {
+        setConnectionStatus("Buffering...");
+      };
+
+      const handlePlaying = () => {
+        setConnectionStatus("");
       };
 
       // Add event listeners
@@ -95,6 +113,8 @@ const Participant = ({
       video.addEventListener("error", handleError);
       video.addEventListener("play", handlePlay);
       video.addEventListener("pause", handlePause);
+      video.addEventListener("waiting", handleWaiting);
+      video.addEventListener("playing", handlePlaying);
 
       // Clean up function
       return () => {
@@ -103,11 +123,16 @@ const Participant = ({
         video.removeEventListener("error", handleError);
         video.removeEventListener("play", handlePlay);
         video.removeEventListener("pause", handlePause);
+        video.removeEventListener("waiting", handleWaiting);
+        video.removeEventListener("playing", handlePlaying);
       };
     } else {
       setIsStreamReady(false);
       setIsVideoPlaying(false);
       setHasVideoTrack(false);
+      if (!isLocal && !stream) {
+        setConnectionStatus("Connecting...");
+      }
     }
   }, [stream, videoRef, username, isLocal]);
 
@@ -124,6 +149,7 @@ const Participant = ({
           console.log(`Video track ended for ${username}`);
           setIsVideoPlaying(false);
           setHasVideoTrack(false);
+          setConnectionStatus("Video track ended");
         };
 
         const handleTrackMute = () => {
@@ -136,6 +162,12 @@ const Participant = ({
           setHasVideoTrack(true);
         };
 
+        // Check track readyState
+        if (videoTrack.readyState === "ended") {
+          setHasVideoTrack(false);
+          setConnectionStatus("Video track ended");
+        }
+
         videoTrack.addEventListener("ended", handleTrackEnded);
         videoTrack.addEventListener("mute", handleTrackMute);
         videoTrack.addEventListener("unmute", handleTrackUnmute);
@@ -147,6 +179,26 @@ const Participant = ({
         };
       } else {
         setHasVideoTrack(false);
+      }
+    }
+  }, [stream, username]);
+
+  // Monitor audio tracks for status
+  useEffect(() => {
+    if (stream) {
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        const audioTrack = audioTracks[0];
+
+        const handleAudioEnded = () => {
+          console.log(`Audio track ended for ${username}`);
+        };
+
+        audioTrack.addEventListener("ended", handleAudioEnded);
+
+        return () => {
+          audioTrack.removeEventListener("ended", handleAudioEnded);
+        };
       }
     }
   }, [stream, username]);
@@ -182,7 +234,9 @@ const Participant = ({
               <div className="connection-status">Camera off</div>
             )}
             {!hasVideoTrack && videoEnabled && (
-              <div className="connection-status">No video signal</div>
+              <div className="connection-status">
+                {connectionStatus || "No video signal"}
+              </div>
             )}
           </div>
         )}
@@ -190,7 +244,14 @@ const Participant = ({
         {showLoadingIndicator && (
           <div className="loading-indicator">
             <div className="loading-spinner"></div>
-            <span>Connecting...</span>
+            <span>{connectionStatus || "Connecting..."}</span>
+          </div>
+        )}
+
+        {/* Show buffering indicator when video is loading */}
+        {shouldShowVideo && connectionStatus && (
+          <div className="video-status-overlay">
+            <span>{connectionStatus}</span>
           </div>
         )}
       </div>

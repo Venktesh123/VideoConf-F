@@ -10,10 +10,8 @@ import Chat from "./Chat";
 import HostControls from "./HostControls";
 import "./Room.css";
 
-// Use environment variable or fallback to production URL
-const API_URL =
-  import.meta.env.VITE_API_URL || "https://conference-b.onrender.com";
-const isDevelopment = import.meta.env.DEV;
+// Fixed API URL - hardcoded as requested
+const API_URL = "https://conference-b.onrender.com";
 
 const Room = () => {
   const { roomId } = useParams();
@@ -304,7 +302,7 @@ const Room = () => {
     });
   }, [addNotification]);
 
-  // Enhanced peer connection
+  // Fixed peer connection with proper PeerJS server configuration
   const initializePeer = useCallback(() => {
     return new Promise((resolve, reject) => {
       if (peerRef.current) {
@@ -317,11 +315,8 @@ const Room = () => {
 
       setConnectionStatus("Initializing peer connection...");
 
+      // Fixed PeerJS configuration - using public STUN servers
       peerRef.current = new Peer(undefined, {
-        host: isDevelopment ? "localhost" : "conference-b-peerjs.onrender.com",
-        port: isDevelopment ? 9000 : 443,
-        path: "/peerjs",
-        secure: !isDevelopment,
         config: {
           iceServers: [
             { urls: "stun:stun.l.google.com:19302" },
@@ -332,7 +327,7 @@ const Room = () => {
           ],
           sdpSemantics: "unified-plan",
         },
-        debug: isDevelopment ? 3 : 1,
+        debug: 1,
       });
 
       const peerTimeout = setTimeout(() => {
@@ -350,7 +345,18 @@ const Room = () => {
       peerRef.current.on("error", (error) => {
         clearTimeout(peerTimeout);
         console.error("Peer error:", error);
-        reject(new Error(`Peer connection failed: ${error.message}`));
+
+        // Try to continue without PeerJS server if it's a server error
+        if (error.type === "server-error" || error.type === "socket-error") {
+          console.warn("PeerJS server error, continuing with socket-only mode");
+          const fallbackId = "fallback-" + Date.now();
+          setPeerId(fallbackId);
+          setConnectionStatus("Connected (limited functionality)");
+          addNotification("Video calls may not work properly", "warning");
+          resolve(fallbackId);
+        } else {
+          reject(new Error(`Peer connection failed: ${error.message}`));
+        }
       });
 
       peerRef.current.on("disconnected", () => {
@@ -364,7 +370,7 @@ const Room = () => {
         }
       });
     });
-  }, []);
+  }, [addNotification]);
 
   // Enhanced call management
   const makeCall = useCallback(
@@ -484,7 +490,9 @@ const Room = () => {
         if (
           newPeerId &&
           newPeerId !== peerId &&
-          connectionEstablished.current
+          connectionEstablished.current &&
+          peerRef.current &&
+          peerRef.current.open
         ) {
           // Delay the call to allow the other peer to be ready
           setTimeout(() => makeCall(newPeerId, newUsername), 2000);
