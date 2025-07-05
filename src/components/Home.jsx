@@ -39,6 +39,49 @@ const Home = () => {
     return null;
   };
 
+  // Enhanced network test function
+  const testNetworkConnectivity = async () => {
+    try {
+      // First test basic internet connectivity
+      await fetch("https://www.google.com/favicon.ico", {
+        mode: "no-cors",
+        cache: "no-cache",
+        signal: AbortSignal.timeout(5000),
+      });
+
+      // Then test our API server
+      const response = await fetch(`${API_URL}/health`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server responded with status: ${response.status}`);
+      }
+
+      return true;
+    } catch (error) {
+      console.error("Network connectivity test failed:", error);
+
+      if (error.name === "AbortError") {
+        throw new Error(
+          "Connection timeout. Please check your internet connection."
+        );
+      } else if (error.message.includes("CORS")) {
+        throw new Error("Network configuration issue. Please try again.");
+      } else if (error.message.includes("Failed to fetch")) {
+        throw new Error(
+          "Cannot connect to server. Please check your internet connection."
+        );
+      } else {
+        throw new Error(`Network error: ${error.message}`);
+      }
+    }
+  };
+
   const createRoom = async () => {
     setError("");
 
@@ -50,9 +93,26 @@ const Home = () => {
 
     setIsCreating(true);
     try {
+      console.log("Testing network connectivity...");
+      await testNetworkConnectivity();
+
       console.log("Creating new room...");
-      const response = await axios.post(`${API_URL}/api/room`);
+
+      // Configure axios with timeout and proper headers
+      const axiosConfig = {
+        timeout: 15000,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+      };
+
+      const response = await axios.post(`${API_URL}/api/room`, {}, axiosConfig);
       const { roomId: newRoomId } = response.data;
+
+      if (!newRoomId) {
+        throw new Error("Server did not return a room ID");
+      }
 
       console.log("Room created successfully:", newRoomId);
 
@@ -65,19 +125,35 @@ const Home = () => {
       });
     } catch (error) {
       console.error("Error creating room:", error);
-      if (error.response) {
-        setError(
-          `Failed to create room: ${
-            error.response.data.error || error.response.statusText
-          }`
-        );
+
+      let errorMessage = "Failed to create room. ";
+
+      if (error.code === "ECONNABORTED" || error.message.includes("timeout")) {
+        errorMessage +=
+          "Connection timeout. Please check your internet connection and try again.";
+      } else if (error.response) {
+        // Server responded with error status
+        const status = error.response.status;
+        if (status === 500) {
+          errorMessage += "Server error. Please try again in a few moments.";
+        } else if (status === 429) {
+          errorMessage +=
+            "Too many requests. Please wait a moment and try again.";
+        } else {
+          errorMessage += `Server error (${status}): ${
+            error.response.data?.error || "Unknown error"
+          }`;
+        }
       } else if (error.request) {
-        setError(
-          "Failed to create room: No response from server. Please check your internet connection."
-        );
+        // Network error
+        errorMessage +=
+          "Cannot connect to server. Please check your internet connection.";
       } else {
-        setError("Failed to create room: " + error.message);
+        // Other error
+        errorMessage += error.message;
       }
+
+      setError(errorMessage);
     } finally {
       setIsCreating(false);
     }
@@ -100,11 +176,24 @@ const Home = () => {
 
     setIsJoining(true);
     try {
+      console.log("Testing network connectivity...");
+      await testNetworkConnectivity();
+
       console.log("Checking if room exists...");
+
+      // Configure axios with timeout and proper headers
+      const axiosConfig = {
+        timeout: 15000,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+      };
 
       // First check if room exists
       const roomCheckResponse = await axios.get(
-        `${API_URL}/api/room/${roomId.trim().toUpperCase()}`
+        `${API_URL}/api/room/${roomId.trim().toUpperCase()}`,
+        axiosConfig
       );
 
       if (roomCheckResponse.data) {
@@ -120,21 +209,35 @@ const Home = () => {
       }
     } catch (error) {
       console.error("Error joining room:", error);
-      if (error.response && error.response.status === 404) {
-        setError("Room not found. Please check the Room ID and try again.");
+
+      let errorMessage = "Failed to join room. ";
+
+      if (error.code === "ECONNABORTED" || error.message.includes("timeout")) {
+        errorMessage +=
+          "Connection timeout. Please check your internet connection and try again.";
       } else if (error.response) {
-        setError(
-          `Failed to join room: ${
-            error.response.data.error || error.response.statusText
-          }`
-        );
+        const status = error.response.status;
+        if (status === 404) {
+          errorMessage +=
+            "Room not found. Please check the Room ID and try again.";
+        } else if (status === 500) {
+          errorMessage += "Server error. Please try again in a few moments.";
+        } else if (status === 429) {
+          errorMessage +=
+            "Too many requests. Please wait a moment and try again.";
+        } else {
+          errorMessage += `Server error (${status}): ${
+            error.response.data?.error || "Unknown error"
+          }`;
+        }
       } else if (error.request) {
-        setError(
-          "Failed to join room: No response from server. Please check your internet connection."
-        );
+        errorMessage +=
+          "Cannot connect to server. Please check your internet connection.";
       } else {
-        setError("Failed to join room: " + error.message);
+        errorMessage += error.message;
       }
+
+      setError(errorMessage);
     } finally {
       setIsJoining(false);
     }
@@ -299,6 +402,20 @@ const Home = () => {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Network Status Indicator */}
+        <div className="network-status">
+          <p
+            style={{
+              color: "#888",
+              fontSize: "12px",
+              textAlign: "center",
+              marginTop: "20px",
+            }}
+          >
+            Server: {API_URL}
+          </p>
         </div>
       </div>
     </div>
