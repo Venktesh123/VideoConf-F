@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { io } from "socket.io-client";
 import Peer from "peerjs";
@@ -10,7 +10,10 @@ import Chat from "./Chat";
 import HostControls from "./HostControls";
 import "./Room.css";
 
-const API_URL = "https://conference-b.onrender.com";
+// Use environment variable or fallback to production URL
+const API_URL =
+  import.meta.env.VITE_API_URL || "https://conference-b.onrender.com";
+const isDevelopment = import.meta.env.DEV;
 
 const Room = () => {
   const { roomId } = useParams();
@@ -18,11 +21,7 @@ const Room = () => {
   const navigate = useNavigate();
   const { username } = location.state || {};
 
-  // Debug states
-  const [debugSteps, setDebugSteps] = useState([]);
-  const [currentStep, setCurrentStep] = useState("initializing");
-  const [detailedStatus, setDetailedStatus] = useState("Starting...");
-
+  // Connection states
   const [participants, setParticipants] = useState({});
   const [stream, setStream] = useState(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
@@ -32,20 +31,18 @@ const Room = () => {
   const [showHostControls, setShowHostControls] = useState(false);
   const [peerId, setPeerId] = useState("");
   const [connectionStatus, setConnectionStatus] = useState("Connecting...");
-
-  // Room state management
   const [roomState, setRoomState] = useState("connecting");
   const [isHost, setIsHost] = useState(false);
   const [waitingParticipants, setWaitingParticipants] = useState([]);
 
   // Chat state
   const [chatMessages, setChatMessages] = useState([]);
-  const [typingUsers, setTypingUsers] = useState([]);
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
 
   // Notifications
   const [notifications, setNotifications] = useState([]);
 
+  // Refs for persistent connections
   const socketRef = useRef();
   const peerRef = useRef();
   const userVideo = useRef();
@@ -53,358 +50,390 @@ const Room = () => {
   const streamRef = useRef();
   const connectionEstablished = useRef(false);
   const initializationRef = useRef(false);
+  const reconnectTimeoutRef = useRef();
+  const heartbeatIntervalRef = useRef();
 
-  // Debug helper function
-  const addDebugStep = (step, status, details = "") => {
-    const timestamp = new Date().toLocaleTimeString();
-    const debugInfo = { step, status, details, timestamp };
-    console.log(`🔍 DEBUG [${timestamp}]: ${step} - ${status}`, details);
-    setDebugSteps((prev) => [...prev, debugInfo]);
-    setCurrentStep(step);
-    setDetailedStatus(`${step}: ${status}`);
-  };
+  // Memoized functions to prevent re-renders
+  const addNotification = useCallback((message, type = "info") => {
+    const id = Date.now() + Math.random();
+    setNotifications((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setNotifications((prev) => prev.filter((notif) => notif.id !== id));
+    }, 5000);
+  }, []);
 
-  // Test server connectivity first
-  const testServerConnection = async () => {
-    try {
-      addDebugStep("server-test", "testing", "Checking server connectivity...");
-
-      const response = await fetch(`${API_URL}/health`, {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        addDebugStep(
-          "server-test",
-          "success",
-          `Server is healthy: ${JSON.stringify(data)}`
-        );
-        return true;
-      } else {
-        addDebugStep(
-          "server-test",
-          "error",
-          `Server returned ${response.status}: ${response.statusText}`
-        );
-        return false;
-      }
-    } catch (error) {
-      addDebugStep(
-        "server-test",
-        "error",
-        `Server connection failed: ${error.message}`
-      );
-      return false;
-    }
-  };
-
-  // Test room existence
-  const testRoomExists = async () => {
-    try {
-      addDebugStep(
-        "room-test",
-        "testing",
-        `Checking if room ${roomId} exists...`
-      );
-
-      const response = await fetch(`${API_URL}/api/room/${roomId}`);
-
-      if (response.ok) {
-        const data = await response.json();
-        addDebugStep(
-          "room-test",
-          "success",
-          `Room exists: ${JSON.stringify(data)}`
-        );
-        return true;
-      } else if (response.status === 404) {
-        addDebugStep("room-test", "error", "Room not found");
-        return false;
-      } else {
-        addDebugStep(
-          "room-test",
-          "error",
-          `Room check failed: ${response.status}`
-        );
-        return false;
-      }
-    } catch (error) {
-      addDebugStep("room-test", "error", `Room check error: ${error.message}`);
-      return false;
-    }
-  };
-
-  useEffect(() => {
-    // Initial validation
-    if (!username) {
-      addDebugStep("validation", "error", "Username is missing");
-      navigate("/");
-      return;
-    }
-
-    if (!roomId) {
-      addDebugStep("validation", "error", "Room ID is missing");
-      navigate("/");
-      return;
-    }
-
-    if (initializationRef.current) {
-      addDebugStep(
-        "validation",
-        "warning",
-        "Already initializing, skipping..."
-      );
-      return;
-    }
-
-    addDebugStep(
-      "validation",
-      "success",
-      `Username: ${username}, Room: ${roomId}`
-    );
-    initializationRef.current = true;
-
-    // Start the connection process
-    startConnectionProcess();
-
-    return () => {
-      addDebugStep("cleanup", "info", "Cleaning up...");
-      cleanup();
-    };
-  }, [username, roomId, navigate]);
-
-  const startConnectionProcess = async () => {
-    try {
-      // Step 1: Test server connectivity
-      const serverOk = await testServerConnection();
-      if (!serverOk) {
-        addNotification(
-          "Cannot connect to server. Please check your internet connection.",
-          "error"
-        );
-        setTimeout(() => navigate("/"), 5000);
-        return;
-      }
-
-      // Step 2: Test room existence
-      const roomExists = await testRoomExists();
-      if (!roomExists) {
-        addNotification(
-          "Room does not exist. Please check the room ID.",
-          "error"
-        );
-        setTimeout(() => navigate("/"), 3000);
-        return;
-      }
-
-      // Step 3: Get media access
-      await initializeMedia();
-
-      // Step 4: Initialize connections
-      await initializeConnections();
-    } catch (error) {
-      addDebugStep("connection-process", "error", error.message);
-      addNotification(`Connection failed: ${error.message}`, "error");
-    }
-  };
-
-  const initializeMedia = async () => {
-    try {
-      addDebugStep(
-        "media",
-        "requesting",
-        "Requesting camera and microphone access..."
-      );
-      setConnectionStatus("Requesting camera and microphone...");
-
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280, max: 1920 },
-          height: { ideal: 720, max: 1080 },
-          facingMode: "user",
+  const addParticipant = useCallback(
+    (peerId, stream, call, username = "Unknown") => {
+      console.log(`➕ Adding participant: ${username} (${peerId})`);
+      setParticipants((prev) => ({
+        ...prev,
+        [peerId]: {
+          id: peerId,
+          peerId,
+          username,
+          stream,
+          call,
+          audioEnabled: true,
+          videoEnabled: true,
         },
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      }));
+    },
+    []
+  );
 
-      addDebugStep(
-        "media",
-        "success",
-        `Got media stream with ${mediaStream.getTracks().length} tracks`
-      );
-
-      setStream(mediaStream);
-      streamRef.current = mediaStream;
-
-      if (userVideo.current) {
-        userVideo.current.srcObject = mediaStream;
-        userVideo.current.muted = true;
-      }
-
-      // Test if video is actually working
-      const videoTracks = mediaStream.getVideoTracks();
-      const audioTracks = mediaStream.getAudioTracks();
-
-      addDebugStep(
-        "media",
-        "info",
-        `Video tracks: ${videoTracks.length}, Audio tracks: ${audioTracks.length}`
-      );
-
-      if (videoTracks.length > 0) {
-        addDebugStep(
-          "media",
-          "info",
-          `Video track enabled: ${videoTracks[0].enabled}`
-        );
-      }
-
-      if (audioTracks.length > 0) {
-        addDebugStep(
-          "media",
-          "info",
-          `Audio track enabled: ${audioTracks[0].enabled}`
-        );
-      }
-    } catch (error) {
-      addDebugStep("media", "error", error.message);
-
-      let errorMessage = "Failed to access camera/microphone: ";
-      if (error.name === "NotAllowedError") {
-        errorMessage += "Permission denied. Please allow access and refresh.";
-      } else if (error.name === "NotFoundError") {
-        errorMessage += "No camera or microphone found.";
-      } else {
-        errorMessage += error.message;
-      }
-
-      throw new Error(errorMessage);
-    }
-  };
-
-  const initializeConnections = async () => {
-    return new Promise((resolve, reject) => {
+  const removeParticipant = useCallback((peerId) => {
+    console.log(`➖ Removing participant: ${peerId}`);
+    if (peersRef.current[peerId]) {
       try {
-        // Initialize Socket
-        addDebugStep("socket", "connecting", "Connecting to server...");
-        setConnectionStatus("Connecting to server...");
+        peersRef.current[peerId].close();
+      } catch (error) {
+        console.error("Error closing peer connection:", error);
+      }
+      delete peersRef.current[peerId];
+    }
+    setParticipants((prev) => {
+      const newParticipants = { ...prev };
+      delete newParticipants[peerId];
+      return newParticipants;
+    });
+  }, []);
 
-        socketRef.current = io(API_URL, {
-          transports: ["websocket", "polling"],
-          reconnection: true,
-          reconnectionAttempts: 5,
-          reconnectionDelay: 1000,
-          timeout: 10000,
-        });
+  // Enhanced media initialization with retry logic
+  const initializeMedia = useCallback(
+    async (retryCount = 0) => {
+      try {
+        setConnectionStatus("Requesting camera and microphone...");
 
-        // Socket event handlers
-        socketRef.current.on("connect", () => {
-          addDebugStep(
-            "socket",
-            "success",
-            `Connected with ID: ${socketRef.current.id}`
-          );
-          setConnectionStatus("Connected to server");
-        });
-
-        socketRef.current.on("connect_error", (error) => {
-          addDebugStep("socket", "error", `Connection error: ${error.message}`);
-          reject(new Error(`Socket connection failed: ${error.message}`));
-        });
-
-        socketRef.current.on("disconnect", (reason) => {
-          addDebugStep("socket", "warning", `Disconnected: ${reason}`);
-        });
-
-        // Initialize Peer
-        addDebugStep("peer", "connecting", "Initializing peer connection...");
-
-        peerRef.current = new Peer(undefined, {
-          config: {
-            iceServers: [
-              { urls: "stun:stun.l.google.com:19302" },
-              { urls: "stun:stun1.l.google.com:19302" },
-              { urls: "stun:stun2.l.google.com:19302" },
-            ],
-          },
-          debug: 1,
-        });
-
-        peerRef.current.on("open", (id) => {
-          addDebugStep("peer", "success", `Peer connected with ID: ${id}`);
-          setPeerId(id);
-          setConnectionStatus("Joining room...");
-
-          // Now join the room
-          addDebugStep(
-            "room-join",
-            "attempting",
-            "Sending join-room request..."
-          );
-
-          socketRef.current.emit("join-room", {
-            roomId,
-            username,
-            peerId: id,
-          });
-
-          // Set a timeout for room joining
-          setTimeout(() => {
-            if (roomState === "connecting") {
-              addDebugStep(
-                "room-join",
-                "timeout",
-                "Room join timeout - no response from server"
-              );
-              reject(new Error("Room join timeout"));
+        // Stop existing tracks before requesting new ones
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((track) => {
+            try {
+              track.stop();
+            } catch (error) {
+              console.warn("Error stopping track:", error);
             }
-          }, 15000);
+          });
+        }
+
+        const mediaConstraints = {
+          video: {
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 },
+            facingMode: "user",
+            frameRate: { ideal: 30, max: 30 },
+          },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: 44100,
+          },
+        };
+
+        const mediaStream = await navigator.mediaDevices.getUserMedia(
+          mediaConstraints
+        );
+
+        // Verify stream is active
+        const videoTracks = mediaStream.getVideoTracks();
+        const audioTracks = mediaStream.getAudioTracks();
+
+        console.log(
+          `📹 Video tracks: ${videoTracks.length}, Audio tracks: ${audioTracks.length}`
+        );
+
+        if (videoTracks.length === 0 && audioTracks.length === 0) {
+          throw new Error("No media tracks available");
+        }
+
+        // Set up stream monitoring
+        videoTracks.forEach((track) => {
+          track.addEventListener("ended", () => {
+            console.warn("Video track ended unexpectedly");
+            // Attempt to restart video
+            setTimeout(() => initializeMedia(0), 1000);
+          });
         });
 
-        peerRef.current.on("error", (error) => {
-          addDebugStep("peer", "error", `Peer error: ${error.message}`);
-          reject(new Error(`Peer connection failed: ${error.message}`));
+        audioTracks.forEach((track) => {
+          track.addEventListener("ended", () => {
+            console.warn("Audio track ended unexpectedly");
+            // Attempt to restart audio
+            setTimeout(() => initializeMedia(0), 1000);
+          });
         });
 
-        // Setup all socket events
-        setupSocketEvents(resolve, reject);
+        setStream(mediaStream);
+        streamRef.current = mediaStream;
+        setVideoEnabled(videoTracks.length > 0);
+        setAudioEnabled(audioTracks.length > 0);
 
-        // Overall timeout
+        if (userVideo.current) {
+          userVideo.current.srcObject = mediaStream;
+          userVideo.current.muted = true;
+
+          // Ensure video plays
+          try {
+            await userVideo.current.play();
+          } catch (playError) {
+            console.warn("Autoplay failed, but continuing:", playError);
+          }
+        }
+
+        return mediaStream;
+      } catch (error) {
+        console.error(
+          `Media initialization failed (attempt ${retryCount + 1}):`,
+          error
+        );
+
+        if (retryCount < 2) {
+          console.log(`Retrying media initialization in 2 seconds...`);
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          return initializeMedia(retryCount + 1);
+        }
+
+        // If all retries failed, try audio-only
+        if (retryCount < 3) {
+          try {
+            console.log("Attempting audio-only fallback...");
+            const audioOnlyStream = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+            });
+            setStream(audioOnlyStream);
+            streamRef.current = audioOnlyStream;
+            setVideoEnabled(false);
+            setAudioEnabled(true);
+            addNotification("Camera unavailable, using audio only", "warning");
+            return audioOnlyStream;
+          } catch (audioError) {
+            console.error("Audio-only fallback failed:", audioError);
+          }
+        }
+
+        let errorMessage = "Failed to access camera/microphone: ";
+        if (error.name === "NotAllowedError") {
+          errorMessage += "Permission denied. Please allow access and refresh.";
+        } else if (error.name === "NotFoundError") {
+          errorMessage += "No camera or microphone found.";
+        } else if (error.name === "NotReadableError") {
+          errorMessage += "Device is already in use by another application.";
+        } else {
+          errorMessage += error.message;
+        }
+
+        throw new Error(errorMessage);
+      }
+    },
+    [addNotification]
+  );
+
+  // Enhanced socket connection with better error handling
+  const initializeSocket = useCallback(() => {
+    return new Promise((resolve, reject) => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+
+      setConnectionStatus("Connecting to server...");
+
+      socketRef.current = io(API_URL, {
+        transports: ["websocket", "polling"],
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        timeout: 20000,
+        forceNew: true,
+      });
+
+      const connectionTimeout = setTimeout(() => {
+        reject(new Error("Socket connection timeout"));
+      }, 20000);
+
+      socketRef.current.on("connect", () => {
+        clearTimeout(connectionTimeout);
+        console.log(`🔌 Connected to server: ${socketRef.current.id}`);
+        setConnectionStatus("Connected to server");
+
+        // Set up heartbeat
+        if (heartbeatIntervalRef.current) {
+          clearInterval(heartbeatIntervalRef.current);
+        }
+
+        heartbeatIntervalRef.current = setInterval(() => {
+          if (socketRef.current && socketRef.current.connected) {
+            socketRef.current.emit("heartbeat-response");
+          }
+        }, 30000);
+
+        resolve();
+      });
+
+      socketRef.current.on("connect_error", (error) => {
+        clearTimeout(connectionTimeout);
+        console.error("Socket connection error:", error);
+        reject(new Error(`Socket connection failed: ${error.message}`));
+      });
+
+      socketRef.current.on("disconnect", (reason) => {
+        console.warn(`🔌 Disconnected from server: ${reason}`);
+        setConnectionStatus("Disconnected from server");
+
+        if (reason === "io server disconnect") {
+          // Server disconnected us, try to reconnect
+          setTimeout(() => {
+            if (!connectionEstablished.current) return;
+            console.log("Attempting to reconnect...");
+            initializeSocket().catch(console.error);
+          }, 2000);
+        }
+      });
+
+      socketRef.current.on("reconnect", () => {
+        console.log("🔌 Reconnected to server");
+        setConnectionStatus("Reconnected to server");
+        addNotification("Reconnected to server", "success");
+      });
+
+      socketRef.current.on("heartbeat", () => {
+        if (socketRef.current) {
+          socketRef.current.emit("heartbeat-response");
+        }
+      });
+    });
+  }, [addNotification]);
+
+  // Enhanced peer connection
+  const initializePeer = useCallback(() => {
+    return new Promise((resolve, reject) => {
+      if (peerRef.current) {
+        try {
+          peerRef.current.destroy();
+        } catch (error) {
+          console.warn("Error destroying previous peer:", error);
+        }
+      }
+
+      setConnectionStatus("Initializing peer connection...");
+
+      peerRef.current = new Peer(undefined, {
+        host: isDevelopment ? "localhost" : "conference-b-peerjs.onrender.com",
+        port: isDevelopment ? 9000 : 443,
+        path: "/peerjs",
+        secure: !isDevelopment,
+        config: {
+          iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:stun1.l.google.com:19302" },
+            { urls: "stun:stun2.l.google.com:19302" },
+            { urls: "stun:stun3.l.google.com:19302" },
+            { urls: "stun:stun4.l.google.com:19302" },
+          ],
+          sdpSemantics: "unified-plan",
+        },
+        debug: isDevelopment ? 3 : 1,
+      });
+
+      const peerTimeout = setTimeout(() => {
+        reject(new Error("Peer connection timeout"));
+      }, 15000);
+
+      peerRef.current.on("open", (id) => {
+        clearTimeout(peerTimeout);
+        console.log(`📡 Peer connected with ID: ${id}`);
+        setPeerId(id);
+        setConnectionStatus("Peer connection established");
+        resolve(id);
+      });
+
+      peerRef.current.on("error", (error) => {
+        clearTimeout(peerTimeout);
+        console.error("Peer error:", error);
+        reject(new Error(`Peer connection failed: ${error.message}`));
+      });
+
+      peerRef.current.on("disconnected", () => {
+        console.warn("📡 Peer disconnected, attempting reconnection...");
+        if (connectionEstablished.current) {
+          try {
+            peerRef.current.reconnect();
+          } catch (error) {
+            console.error("Peer reconnection failed:", error);
+          }
+        }
+      });
+    });
+  }, []);
+
+  // Enhanced call management
+  const makeCall = useCallback(
+    (remotePeerId, remoteUsername) => {
+      console.log(`📞 Making call to ${remoteUsername} (${remotePeerId})`);
+
+      if (!peerRef.current || !peerRef.current.open || !streamRef.current) {
+        console.warn("Cannot make call: peer or stream not ready");
+        return;
+      }
+
+      if (peersRef.current[remotePeerId]) {
+        console.warn("Call already exists with this peer");
+        return;
+      }
+
+      try {
+        const call = peerRef.current.call(remotePeerId, streamRef.current);
+
+        if (!call) {
+          console.error("Failed to create call");
+          return;
+        }
+
+        // Set up call event handlers
+        call.on("stream", (remoteStream) => {
+          console.log(`📹 Received stream from ${remoteUsername}`);
+          addParticipant(remotePeerId, remoteStream, call, remoteUsername);
+        });
+
+        call.on("close", () => {
+          console.log(`📞 Call closed with ${remoteUsername}`);
+          removeParticipant(remotePeerId);
+        });
+
+        call.on("error", (error) => {
+          console.error(`📞 Call error with ${remoteUsername}:`, error);
+          removeParticipant(remotePeerId);
+        });
+
+        // Store the call
+        peersRef.current[remotePeerId] = call;
+
+        // Set up call timeout
         setTimeout(() => {
-          if (roomState === "connecting") {
-            addDebugStep("timeout", "error", "Overall connection timeout");
-            reject(new Error("Connection timeout"));
+          if (call && call.open === false) {
+            console.warn(`Call to ${remoteUsername} timed out`);
+            call.close();
+            removeParticipant(remotePeerId);
           }
         }, 30000);
       } catch (error) {
-        addDebugStep("initialization", "error", error.message);
-        reject(error);
+        console.error(`Error making call to ${remoteUsername}:`, error);
       }
-    });
-  };
+    },
+    [addParticipant, removeParticipant]
+  );
 
-  const setupSocketEvents = (resolve, reject) => {
+  // Socket event handlers
+  const setupSocketEvents = useCallback(() => {
+    if (!socketRef.current) return;
+
     // Handle admission status
     socketRef.current.on(
       "admission-status",
       ({ status, isHost: hostStatus, chatMessages: messages, message }) => {
-        addDebugStep(
-          "admission",
-          "received",
-          `Status: ${status}, Host: ${hostStatus}`
-        );
+        console.log(`🎫 Admission status: ${status}, Host: ${hostStatus}`);
 
         if (status === "approved") {
-          addDebugStep(
-            "admission",
-            "success",
-            "Access approved - joining meeting"
-          );
           setRoomState("approved");
           setIsHost(hostStatus || false);
           setConnectionStatus("Connected");
@@ -419,70 +448,56 @@ const Room = () => {
           } else {
             addNotification("Welcome to the meeting!", "success");
           }
-
-          resolve();
         } else if (status === "waiting") {
-          addDebugStep("admission", "waiting", "Waiting for host approval");
           setRoomState("waiting");
           setConnectionStatus("Waiting for host approval");
-          resolve(); // This is also a successful state
         } else if (status === "denied") {
-          addDebugStep("admission", "denied", message || "Access denied");
           setRoomState("denied");
           addNotification(message || "Access denied by host", "error");
           setTimeout(() => navigate("/"), 3000);
-          resolve(); // Even denial is a resolved state
         }
       }
     );
 
     // Handle room errors
     socketRef.current.on("room-error", ({ message }) => {
-      addDebugStep("room-error", "error", message);
-      reject(new Error(`Room error: ${message}`));
+      console.error("Room error:", message);
+      addNotification(`Room error: ${message}`, "error");
+      setTimeout(() => navigate("/"), 3000);
     });
 
-    // Handle other events
+    // Handle waiting room updates
     socketRef.current.on(
       "waiting-room-update",
       ({ waitingParticipants: waiting }) => {
-        addDebugStep(
-          "waiting-room",
-          "update",
-          `${waiting?.length || 0} participants waiting`
-        );
         setWaitingParticipants(waiting || []);
       }
     );
 
+    // Handle user joined
     socketRef.current.on(
       "user-joined",
       ({ participantId, username: newUsername, peerId: newPeerId }) => {
-        addDebugStep(
-          "user-joined",
-          "info",
-          `${newUsername} joined with peer ID ${newPeerId}`
-        );
+        console.log(`👤 ${newUsername} joined with peer ID ${newPeerId}`);
         addNotification(`${newUsername} joined the meeting`, "success");
 
         if (
           newPeerId &&
           newPeerId !== peerId &&
-          peerRef.current &&
           connectionEstablished.current
         ) {
-          setTimeout(() => makeCall(newPeerId, newUsername), 1000);
+          // Delay the call to allow the other peer to be ready
+          setTimeout(() => makeCall(newPeerId, newUsername), 2000);
         }
       }
     );
 
+    // Handle existing participants
     socketRef.current.on(
       "room-participants",
       ({ participants: existingParticipants }) => {
-        addDebugStep(
-          "existing-participants",
-          "info",
-          `Found ${
+        console.log(
+          `👥 Found ${
             Object.keys(existingParticipants || {}).length
           } existing participants`
         );
@@ -492,7 +507,7 @@ const Room = () => {
             if (participant.peerId && participant.peerId !== peerId) {
               setTimeout(
                 () => makeCall(participant.peerId, participant.username),
-                2000
+                3000
               );
             }
           });
@@ -500,27 +515,17 @@ const Room = () => {
       }
     );
 
-    // Additional socket events...
+    // Handle user left
     socketRef.current.on(
       "user-left",
       ({ peerId: leftPeerId, username: leftUsername }) => {
-        addDebugStep("user-left", "info", `${leftUsername} left`);
+        console.log(`👋 ${leftUsername} left`);
         addNotification(`${leftUsername} left the meeting`, "info");
-
-        if (leftPeerId && peersRef.current[leftPeerId]) {
-          peersRef.current[leftPeerId].close();
-          delete peersRef.current[leftPeerId];
-        }
-
-        setParticipants((prev) => {
-          const newParticipants = { ...prev };
-          delete newParticipants[leftPeerId];
-          return newParticipants;
-        });
+        removeParticipant(leftPeerId);
       }
     );
 
-    // Audio/Video toggles
+    // Handle media toggles
     socketRef.current.on(
       "user-toggle-audio",
       ({ peerId: remotePeerId, enabled }) => {
@@ -541,7 +546,7 @@ const Room = () => {
       }
     );
 
-    // Chat events
+    // Handle chat
     socketRef.current.on("new-message", (message) => {
       setChatMessages((prev) => [...prev, message]);
       if (!showChat && message.username !== username) {
@@ -553,7 +558,7 @@ const Room = () => {
       }
     });
 
-    // Host events
+    // Handle host transfer
     socketRef.current.on(
       "host-transferred",
       ({ isHost: newHostStatus, message }) => {
@@ -561,108 +566,189 @@ const Room = () => {
         addNotification(message, "success");
       }
     );
-  };
 
-  const makeCall = (remotePeerId, remoteUsername) => {
-    addDebugStep(
-      "call",
-      "making",
-      `Calling ${remoteUsername} (${remotePeerId})`
-    );
+    // Handle incoming calls
+    if (peerRef.current) {
+      peerRef.current.on("call", (call) => {
+        console.log(`📞 Incoming call from ${call.peer}`);
 
-    if (
-      !peerRef.current ||
-      !peerRef.current.open ||
-      peersRef.current[remotePeerId]
-    ) {
-      addDebugStep("call", "skipped", "Peer not ready or already connected");
-      return;
+        if (streamRef.current) {
+          call.answer(streamRef.current);
+
+          call.on("stream", (remoteStream) => {
+            console.log(`📹 Received stream from incoming call: ${call.peer}`);
+            addParticipant(call.peer, remoteStream, call, "Unknown");
+          });
+
+          call.on("close", () => {
+            console.log(`📞 Incoming call closed: ${call.peer}`);
+            removeParticipant(call.peer);
+          });
+
+          call.on("error", (error) => {
+            console.error(`📞 Incoming call error: ${call.peer}`, error);
+            removeParticipant(call.peer);
+          });
+
+          peersRef.current[call.peer] = call;
+        } else {
+          console.warn("No stream available to answer call");
+          call.close();
+        }
+      });
     }
+  }, [
+    peerId,
+    username,
+    showChat,
+    addNotification,
+    navigate,
+    makeCall,
+    addParticipant,
+    removeParticipant,
+  ]);
 
-    const call = peerRef.current.call(remotePeerId, streamRef.current);
-    if (!call) {
-      addDebugStep("call", "error", "Failed to create call");
-      return;
-    }
+  // Main initialization function
+  const initializeConnection = useCallback(async () => {
+    try {
+      // Step 1: Test server connectivity
+      setConnectionStatus("Testing server connection...");
+      const healthResponse = await fetch(`${API_URL}/health`);
+      if (!healthResponse.ok) {
+        throw new Error("Server is not responding");
+      }
 
-    call.on("stream", (remoteStream) => {
-      addDebugStep(
-        "call",
-        "stream-received",
-        `Got stream from ${remoteUsername}`
-      );
-      addParticipant(remotePeerId, remoteStream, call, remoteUsername);
-    });
+      // Step 2: Test room existence
+      setConnectionStatus("Checking room...");
+      const roomResponse = await fetch(`${API_URL}/api/room/${roomId}`);
+      if (!roomResponse.ok) {
+        throw new Error("Room does not exist");
+      }
 
-    call.on("close", () => {
-      addDebugStep("call", "closed", `Call closed with ${remoteUsername}`);
-      removeParticipant(remotePeerId);
-    });
+      // Step 3: Initialize media
+      const mediaStream = await initializeMedia();
 
-    call.on("error", (error) => {
-      addDebugStep("call", "error", `Call error: ${error.message}`);
-      removeParticipant(remotePeerId);
-    });
+      // Step 4: Initialize socket
+      await initializeSocket();
 
-    peersRef.current[remotePeerId] = call;
-  };
+      // Step 5: Initialize peer
+      const peerIdResult = await initializePeer();
 
-  const addParticipant = (peerId, stream, call, username = "Unknown") => {
-    setParticipants((prev) => ({
-      ...prev,
-      [peerId]: {
-        id: peerId,
-        peerId,
+      // Step 6: Set up socket events
+      setupSocketEvents();
+
+      // Step 7: Join room
+      setConnectionStatus("Joining room...");
+      socketRef.current.emit("join-room", {
+        roomId,
         username,
-        stream,
-        call,
-        audioEnabled: true,
-        videoEnabled: true,
-      },
-    }));
-  };
+        peerId: peerIdResult,
+      });
+    } catch (error) {
+      console.error("Connection initialization failed:", error);
+      addNotification(`Connection failed: ${error.message}`, "error");
 
-  const removeParticipant = (peerId) => {
-    if (peersRef.current[peerId]) {
-      delete peersRef.current[peerId];
+      // Retry logic
+      if (!reconnectTimeoutRef.current) {
+        reconnectTimeoutRef.current = setTimeout(() => {
+          reconnectTimeoutRef.current = null;
+          if (initializationRef.current) {
+            console.log("Retrying connection...");
+            initializeConnection();
+          }
+        }, 5000);
+      }
     }
-    setParticipants((prev) => {
-      const newParticipants = { ...prev };
-      delete newParticipants[peerId];
-      return newParticipants;
-    });
-  };
+  }, [
+    roomId,
+    username,
+    initializeMedia,
+    initializeSocket,
+    initializePeer,
+    setupSocketEvents,
+    addNotification,
+  ]);
 
-  const cleanup = () => {
-    addDebugStep("cleanup", "starting", "Cleaning up connections...");
+  // Main effect
+  useEffect(() => {
+    if (!username || !roomId) {
+      navigate("/");
+      return;
+    }
+
+    if (initializationRef.current) {
+      return;
+    }
+
+    initializationRef.current = true;
     connectionEstablished.current = false;
-    initializationRef.current = false;
 
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-    }
+    initializeConnection();
 
-    Object.values(peersRef.current).forEach((call) => {
-      if (call && call.close) call.close();
-    });
+    return () => {
+      console.log("🧹 Cleaning up Room component...");
+      initializationRef.current = false;
+      connectionEstablished.current = false;
 
-    if (peerRef.current && !peerRef.current.destroyed) {
-      peerRef.current.destroy();
-    }
+      // Clear timeouts
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
+      }
 
-    if (socketRef.current) {
-      socketRef.current.disconnect();
-    }
-  };
+      // Stop media tracks
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => {
+          try {
+            track.stop();
+          } catch (error) {
+            console.warn("Error stopping track:", error);
+          }
+        });
+      }
 
-  // Control functions
-  const toggleAudio = () => {
+      // Close peer connections
+      Object.values(peersRef.current).forEach((call) => {
+        if (call && typeof call.close === "function") {
+          try {
+            call.close();
+          } catch (error) {
+            console.warn("Error closing call:", error);
+          }
+        }
+      });
+
+      // Destroy peer
+      if (peerRef.current && !peerRef.current.destroyed) {
+        try {
+          peerRef.current.destroy();
+        } catch (error) {
+          console.warn("Error destroying peer:", error);
+        }
+      }
+
+      // Disconnect socket
+      if (socketRef.current) {
+        try {
+          socketRef.current.disconnect();
+        } catch (error) {
+          console.warn("Error disconnecting socket:", error);
+        }
+      }
+    };
+  }, [username, roomId, navigate, initializeConnection]);
+
+  // Enhanced toggle functions with better stream management
+  const toggleAudio = useCallback(() => {
     if (streamRef.current) {
       const audioTracks = streamRef.current.getAudioTracks();
       audioTracks.forEach((track) => {
         track.enabled = !audioEnabled;
       });
       setAudioEnabled(!audioEnabled);
+
       if (socketRef.current) {
         socketRef.current.emit("toggle-audio", {
           roomId,
@@ -671,42 +757,43 @@ const Room = () => {
         });
       }
     }
-  };
+  }, [audioEnabled, roomId, peerId]);
 
-  const toggleVideo = async () => {
-    // Similar implementation as before but with debug logging
-    if (!videoEnabled) {
-      try {
-        addDebugStep("video", "enabling", "Starting video...");
+  const toggleVideo = useCallback(async () => {
+    try {
+      if (!videoEnabled) {
+        // Enable video
         const newStream = await navigator.mediaDevices.getUserMedia({
           video: {
             width: { ideal: 1280 },
             height: { ideal: 720 },
             facingMode: "user",
           },
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
+          audio: true,
         });
 
+        // Stop old stream
         if (streamRef.current) {
           streamRef.current.getTracks().forEach((track) => track.stop());
         }
 
+        // Update refs and state
         streamRef.current = newStream;
         setStream(newStream);
+        setVideoEnabled(true);
+
+        // Update video element
         if (userVideo.current) {
           userVideo.current.srcObject = newStream;
         }
 
-        // Update peer connections
+        // Update all peer connections
         Object.values(peersRef.current).forEach((call) => {
           if (call && call.peerConnection) {
+            const senders = call.peerConnection.getSenders();
             const videoTrack = newStream.getVideoTracks()[0];
             const audioTrack = newStream.getAudioTracks()[0];
-            const senders = call.peerConnection.getSenders();
+
             senders.forEach((sender) => {
               if (sender.track) {
                 if (sender.track.kind === "video" && videoTrack) {
@@ -718,110 +805,118 @@ const Room = () => {
             });
           }
         });
+      } else {
+        // Disable video
+        if (streamRef.current) {
+          const videoTracks = streamRef.current.getVideoTracks();
+          videoTracks.forEach((track) => track.stop());
 
-        setVideoEnabled(true);
-        addDebugStep("video", "enabled", "Video started successfully");
-      } catch (error) {
-        addDebugStep(
-          "video",
-          "error",
-          `Failed to enable video: ${error.message}`
-        );
-        addNotification("Failed to access camera", "error");
-      }
-    } else {
-      addDebugStep("video", "disabling", "Stopping video...");
-      if (streamRef.current) {
-        const videoTracks = streamRef.current.getVideoTracks();
-        videoTracks.forEach((track) => track.stop());
+          const audioTracks = streamRef.current.getAudioTracks();
+          const audioOnlyStream = new MediaStream(audioTracks);
 
-        const audioTracks = streamRef.current.getAudioTracks();
-        const audioOnlyStream = new MediaStream(audioTracks);
+          streamRef.current = audioOnlyStream;
+          setStream(audioOnlyStream);
+          setVideoEnabled(false);
 
-        streamRef.current = audioOnlyStream;
-        setStream(audioOnlyStream);
-        if (userVideo.current) {
-          userVideo.current.srcObject = audioOnlyStream;
+          if (userVideo.current) {
+            userVideo.current.srcObject = audioOnlyStream;
+          }
         }
-        setVideoEnabled(false);
-        addDebugStep("video", "disabled", "Video stopped");
       }
-    }
 
-    if (socketRef.current) {
-      socketRef.current.emit("toggle-video", {
-        roomId,
-        peerId,
-        enabled: !videoEnabled,
-      });
-    }
-  };
-
-  const leaveRoom = () => {
-    cleanup();
-    navigate("/");
-  };
-
-  // Host control functions (simplified for debugging)
-  const approveParticipant = (participantId) => {
-    if (socketRef.current && isHost) {
-      socketRef.current.emit("approve-participant", { roomId, participantId });
-      addNotification("Participant approved", "success");
-    }
-  };
-
-  const denyParticipant = (participantId) => {
-    if (socketRef.current && isHost) {
-      socketRef.current.emit("deny-participant", { roomId, participantId });
-      addNotification("Participant denied", "info");
-    }
-  };
-
-  const removeParticipantHandler = (participantId) => {
-    if (!isHost) return;
-    if (window.confirm("Remove participant?")) {
-      const participant = Object.values(participants).find(
-        (p) => p.id === participantId
-      );
+      // Notify server
       if (socketRef.current) {
-        socketRef.current.emit("remove-participant", {
+        socketRef.current.emit("toggle-video", {
           roomId,
-          participantId,
-          peerId: participant?.peerId,
+          peerId,
+          enabled: !videoEnabled,
         });
       }
+    } catch (error) {
+      console.error("Error toggling video:", error);
+      addNotification("Failed to toggle video", "error");
     }
-  };
+  }, [videoEnabled, roomId, peerId, addNotification]);
 
-  const sendMessage = (message) => {
-    if (socketRef.current && message.trim()) {
-      socketRef.current.emit("send-message", {
-        roomId,
-        message: message.trim(),
-        username,
-      });
-    }
-  };
+  const leaveRoom = useCallback(() => {
+    initializationRef.current = false;
+    connectionEstablished.current = false;
+    navigate("/");
+  }, [navigate]);
 
-  const toggleChat = () => {
+  // Host control functions
+  const approveParticipant = useCallback(
+    (participantId) => {
+      if (socketRef.current && isHost) {
+        socketRef.current.emit("approve-participant", {
+          roomId,
+          participantId,
+        });
+        addNotification("Participant approved", "success");
+      }
+    },
+    [roomId, isHost, addNotification]
+  );
+
+  const denyParticipant = useCallback(
+    (participantId) => {
+      if (socketRef.current && isHost) {
+        socketRef.current.emit("deny-participant", { roomId, participantId });
+        addNotification("Participant denied", "info");
+      }
+    },
+    [roomId, isHost, addNotification]
+  );
+
+  const removeParticipantHandler = useCallback(
+    (participantId) => {
+      if (!isHost) return;
+      if (window.confirm("Remove participant?")) {
+        const participant = Object.values(participants).find(
+          (p) => p.id === participantId
+        );
+        if (socketRef.current) {
+          socketRef.current.emit("remove-participant", {
+            roomId,
+            participantId,
+            peerId: participant?.peerId,
+          });
+        }
+      }
+    },
+    [isHost, participants, roomId]
+  );
+
+  const sendMessage = useCallback(
+    (message) => {
+      if (socketRef.current && message.trim()) {
+        socketRef.current.emit("send-message", {
+          roomId,
+          message: message.trim(),
+          username,
+        });
+      }
+    },
+    [roomId, username]
+  );
+
+  const toggleChat = useCallback(() => {
     setShowChat(!showChat);
     if (!showChat) setHasUnreadMessages(false);
-  };
+  }, [showChat]);
 
-  const toggleHostControls = () => {
+  const toggleHostControls = useCallback(() => {
     if (!isHost) {
       addNotification("Only the host can access host controls", "error");
       return;
     }
     setShowHostControls(!showHostControls);
-  };
+  }, [isHost, showHostControls, addNotification]);
 
-  const copyRoomId = () => {
+  const copyRoomId = useCallback(() => {
     navigator.clipboard
       .writeText(roomId)
-      .then(() => {
-        addNotification("Room ID copied", "success");
-      })
+      .then(() => addNotification("Room ID copied", "success"))
       .catch(() => {
         const textarea = document.createElement("textarea");
         textarea.value = roomId;
@@ -831,15 +926,7 @@ const Room = () => {
         document.body.removeChild(textarea);
         addNotification("Room ID copied", "success");
       });
-  };
-
-  const addNotification = (message, type = "info") => {
-    const id = Date.now();
-    setNotifications((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setNotifications((prev) => prev.filter((notif) => notif.id !== id));
-    }, 5000);
-  };
+  }, [roomId, addNotification]);
 
   // Render different states
   if (roomState === "waiting") {
@@ -868,81 +955,18 @@ const Room = () => {
         <div className="connecting-message">
           <h2>{connectionStatus}</h2>
           <div className="spinner"></div>
-          <div style={{ marginTop: "20px", color: "#888", fontSize: "14px" }}>
-            <p>Current step: {currentStep}</p>
-            <p>{detailedStatus}</p>
-          </div>
-
-          {/* Debug Panel */}
-          <div
-            style={{
-              marginTop: "30px",
-              textAlign: "left",
-              backgroundColor: "#2a2a2a",
-              padding: "15px",
-              borderRadius: "8px",
-              maxHeight: "200px",
-              overflowY: "auto",
-              fontSize: "12px",
-            }}
-          >
-            <h4 style={{ margin: "0 0 10px 0", color: "#2d8cff" }}>
-              Debug Log:
-            </h4>
-            {debugSteps.map((step, index) => (
-              <div
-                key={index}
-                style={{
-                  margin: "5px 0",
-                  color:
-                    step.status === "error"
-                      ? "#ff6b6b"
-                      : step.status === "success"
-                      ? "#4caf50"
-                      : step.status === "warning"
-                      ? "#ff9800"
-                      : "#ccc",
-                }}
-              >
-                <strong>[{step.timestamp}]</strong> {step.step}: {step.status}
-                {step.details && (
-                  <div style={{ marginLeft: "10px", fontSize: "11px" }}>
-                    {step.details}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-
           <div style={{ marginTop: "20px" }}>
             <button
               onClick={() => {
                 initializationRef.current = false;
                 window.location.reload();
               }}
-              style={{
-                backgroundColor: "#2d8cff",
-                color: "white",
-                border: "none",
-                padding: "10px 20px",
-                borderRadius: "5px",
-                cursor: "pointer",
-                marginRight: "10px",
-              }}
+              className="copy-button"
+              style={{ marginRight: "10px" }}
             >
               Retry Connection
             </button>
-            <button
-              onClick={() => navigate("/")}
-              style={{
-                backgroundColor: "#ff5d5d",
-                color: "white",
-                border: "none",
-                padding: "10px 20px",
-                borderRadius: "5px",
-                cursor: "pointer",
-              }}
-            >
+            <button onClick={() => navigate("/")} className="copy-button">
               Go Back
             </button>
           </div>
@@ -1053,7 +1077,6 @@ const Room = () => {
           onSendMessage={sendMessage}
           currentUsername={username}
           isHost={isHost}
-          typingUsers={typingUsers}
         />
       )}
 
