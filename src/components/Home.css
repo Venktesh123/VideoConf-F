@@ -21,63 +21,6 @@
   color: #2d8cff;
 }
 
-/* Server Status Indicator */
-.server-status {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 15px;
-  margin-bottom: 20px;
-  background-color: #2a2a2a;
-  border-radius: 8px;
-  border-left: 4px solid #666;
-}
-
-.status-indicator {
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.status-indicator.checking {
-  color: #ffa726;
-}
-
-.status-indicator.online {
-  color: #4caf50;
-}
-
-.status-indicator.offline {
-  color: #f44336;
-}
-
-.server-status.online {
-  border-left-color: #4caf50;
-}
-
-.server-status.offline {
-  border-left-color: #f44336;
-}
-
-.retry-button {
-  background-color: #2d8cff;
-  color: white;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 4px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-}
-
-.retry-button:hover:not(:disabled) {
-  background-color: #1a7bef;
-}
-
-.retry-button:disabled {
-  background-color: #666;
-  cursor: not-allowed;
-}
-
 .input-group {
   margin-bottom: 20px;
 }
@@ -97,38 +40,6 @@
   background-color: #333;
   color: white;
   font-size: 16px;
-  transition: border-color 0.2s ease;
-}
-
-.input-group input:focus {
-  outline: none;
-  border-color: #2d8cff;
-}
-
-.room-id-input-group {
-  display: flex;
-  gap: 8px;
-}
-
-.room-id-input-group input {
-  flex: 1;
-}
-
-.generate-button {
-  background-color: #333;
-  border: 1px solid #444;
-  color: white;
-  padding: 12px;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 16px;
-  transition: all 0.2s ease;
-  min-width: 48px;
-}
-
-.generate-button:hover {
-  background-color: #444;
-  border-color: #555;
 }
 
 .button-group {
@@ -153,14 +64,13 @@
   border: none;
 }
 
-.create-button:hover:not(:disabled) {
+.create-button:hover {
   background-color: #1a7bef;
 }
 
 .create-button:disabled {
   background-color: #666;
   cursor: not-allowed;
-  opacity: 0.6;
 }
 
 .join-button {
@@ -169,14 +79,8 @@
   border: 1px solid #2d8cff;
 }
 
-.join-button:hover:not(:disabled) {
+.join-button:hover {
   background-color: rgba(45, 140, 255, 0.1);
-}
-
-.join-button:disabled {
-  border-color: #666;
-  color: #666;
-  cursor: not-allowed;
 }
 
 .divider {
@@ -195,92 +99,4 @@
 
 .divider span {
   padding: 0 10px;
-}
-
-/* Debug Information */
-.debug-info {
-  margin-top: 30px;
-  padding-top: 20px;
-  border-top: 1px solid #333;
-}
-
-.debug-info details {
-  cursor: pointer;
-}
-
-.debug-info summary {
-  color: #888;
-  font-size: 12px;
-  padding: 8px 0;
-  outline: none;
-}
-
-.debug-info summary:hover {
-  color: #2d8cff;
-}
-
-.debug-info div {
-  margin-top: 10px;
-  padding: 10px;
-  background-color: #2a2a2a;
-  border-radius: 4px;
-  font-size: 11px;
-  font-family: "Courier New", monospace;
-}
-
-.debug-info p {
-  margin: 5px 0;
-  color: #ccc;
-}
-
-.debug-info strong {
-  color: #2d8cff;
-}
-
-/* Mobile Responsive */
-@media (max-width: 768px) {
-  .home {
-    padding: 15px;
-  }
-
-  .home-container {
-    padding: 20px;
-  }
-
-  .server-status {
-    flex-direction: column;
-    gap: 8px;
-    text-align: center;
-  }
-
-  .room-id-input-group {
-    flex-direction: column;
-  }
-
-  .generate-button {
-    min-width: auto;
-  }
-}
-
-@media (max-width: 480px) {
-  .home {
-    padding: 10px;
-  }
-
-  .home-container {
-    padding: 15px;
-  }
-
-  .home-container h1 {
-    font-size: 24px;
-    margin-bottom: 20px;
-  }
-
-  .input-group input,
-  .create-button,
-  .join-button,
-  .generate-button {
-    padding: 10px;
-    font-size: 14px;
-  }
 }
